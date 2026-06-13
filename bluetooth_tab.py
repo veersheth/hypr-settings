@@ -1,8 +1,346 @@
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
+import re
+import subprocess
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import (
+    QCheckBox, QFrame, QHBoxLayout, QLabel,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton,
+    QVBoxLayout, QWidget,
+)
+
+
+def _run(cmd):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        return r.stdout.strip(), r.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return "", False
+
+
+def _bt_enabled():
+    out, _ = _run(["bluetoothctl", "show"])
+    return "Powered: yes" in out
+
+
+def _parse_devices(out):
+    devices = {}
+    for line in out.splitlines():
+        m = re.match(r"Device ([0-9A-F:]{17})\s+(.*)", line)
+        if m:
+            mac, name = m.group(1), m.group(2)
+            devices[mac] = name
+    return devices
+
+
+def _device_info(mac):
+    out, _ = _run(["bluetoothctl", "info", mac])
+    info = {"mac": mac, "name": mac, "paired": False,
+            "connected": False, "trusted": False, "icon": ""}
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("Name:"):
+            info["name"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Icon:"):
+            info["icon"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Paired:"):
+            info["paired"] = line.split(":", 1)[1].strip().lower() == "yes"
+        elif line.startswith("Connected:"):
+            info["connected"] = line.split(":", 1)[1].strip().lower() == "yes"
+        elif line.startswith("Trusted:"):
+            info["trusted"] = line.split(":", 1)[1].strip().lower() == "yes"
+    return info
+
+
+class _LoadThread(QThread):
+    done = Signal(list)
+    error = Signal(str)
+
+    def run(self):
+        if not _bt_enabled():
+            self.error.emit("Bluetooth is powered off")
+            return
+        out, _ = _run(["bluetoothctl", "devices"])
+        macs = list(_parse_devices(out).keys())
+        devices = [_device_info(mac) for mac in macs]
+        devices.sort(key=lambda d: (-d["connected"], -d["paired"], d["name"].lower()))
+        self.done.emit(devices)
+
+
+class _ScanThread(QThread):
+    done = Signal()
+
+    def run(self):
+        # scan for 8 seconds then stop
+        try:
+            proc = subprocess.Popen(
+                ["bluetoothctl", "scan", "on"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+        _run(["bluetoothctl", "scan", "off"])
+        self.done.emit()
+
+
+class _ActionThread(QThread):
+    done = Signal(bool, str)
+
+    def __init__(self, cmd):
+        super().__init__()
+        self._cmd = cmd
+
+    def run(self):
+        out, ok = _run(self._cmd)
+        self.done.emit(ok, out)
+
+
+def _separator():
+    f = QFrame()
+    f.setFrameShape(QFrame.HLine)
+    return f
+
+
+class _DetailPanel(QWidget):
+    action_done = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._device = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 0, 0, 0)
+        root.setSpacing(10)
+        root.setAlignment(Qt.AlignTop)
+
+        self._name_lbl = QLabel()
+        self._name_lbl.setStyleSheet("font-weight: bold; font-size: 16px;")
+        root.addWidget(self._name_lbl)
+
+        self._mac_lbl = QLabel()
+        self._icon_lbl = QLabel()
+        root.addWidget(self._mac_lbl)
+        root.addWidget(self._icon_lbl)
+
+        root.addWidget(_separator())
+
+        self._paired_lbl = QLabel()
+        self._connected_lbl = QLabel()
+        root.addWidget(self._paired_lbl)
+        root.addWidget(self._connected_lbl)
+
+        root.addWidget(_separator())
+
+        self._trust_cb = QCheckBox("Trusted")
+        self._trust_cb.stateChanged.connect(self._toggle_trust)
+        root.addWidget(self._trust_cb)
+
+        root.addWidget(_separator())
+
+        btn_row = QHBoxLayout()
+        self._connect_btn = QPushButton()
+        self._connect_btn.clicked.connect(self._on_connect)
+        self._pair_btn = QPushButton()
+        self._pair_btn.clicked.connect(self._on_pair)
+        self._remove_btn = QPushButton("Remove")
+        self._remove_btn.clicked.connect(self._on_remove)
+        for btn in (self._connect_btn, self._pair_btn, self._remove_btn):
+            btn_row.addWidget(btn)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        self._status_lbl = QLabel()
+        root.addWidget(self._status_lbl)
+        root.addStretch()
+        self.setVisible(False)
+
+    def show_device(self, device: dict):
+        self._device = device
+
+        self._name_lbl.setText(device["name"])
+        self._mac_lbl.setText(f"Address: {device['mac']}")
+        self._icon_lbl.setText(f"Type: {device['icon'] or '—'}")
+        self._paired_lbl.setText(f"Paired: {'Yes' if device['paired'] else 'No'}")
+        self._connected_lbl.setText(f"Connected: {'Yes' if device['connected'] else 'No'}")
+        self._status_lbl.setText("")
+
+        self._trust_cb.blockSignals(True)
+        self._trust_cb.setChecked(device["trusted"])
+        self._trust_cb.blockSignals(False)
+
+        self._connect_btn.setText("Disconnect" if device["connected"] else "Connect")
+        self._connect_btn.setVisible(device["paired"])
+        self._pair_btn.setText("Unpair" if device["paired"] else "Pair")
+        self._remove_btn.setVisible(device["paired"])
+
+        self.setVisible(True)
+
+    def _set_status(self, text):
+        self._status_lbl.setText(text)
+
+    def _run_action(self, cmd, status_msg):
+        self._set_status(status_msg)
+        self._connect_btn.setEnabled(False)
+        self._pair_btn.setEnabled(False)
+        t = _ActionThread(cmd)
+        t.done.connect(self._on_action_done)
+        t.start()
+        self._thread = t
+
+    def _on_action_done(self, ok, out):
+        self._connect_btn.setEnabled(True)
+        self._pair_btn.setEnabled(True)
+        if ok:
+            self.action_done.emit()
+        else:
+            last_line = out.splitlines()[-1] if out else "unknown error"
+            self._set_status(f"Failed: {last_line}")
+
+    def _on_connect(self):
+        if not self._device:
+            return
+        if self._device["connected"]:
+            self._run_action(["bluetoothctl", "disconnect", self._device["mac"]], "Disconnecting…")
+        else:
+            self._run_action(["bluetoothctl", "connect", self._device["mac"]], "Connecting…")
+
+    def _on_pair(self):
+        if not self._device:
+            return
+        if self._device["paired"]:
+            self._run_action(["bluetoothctl", "untrust", self._device["mac"]], "Unpairing…")
+            _run(["bluetoothctl", "untrust", self._device["mac"]])
+            self._run_action(["bluetoothctl", "remove", self._device["mac"]], "Removing…")
+        else:
+            self._run_action(["bluetoothctl", "pair", self._device["mac"]], "Pairing…")
+
+    def _on_remove(self):
+        if not self._device:
+            return
+        reply = QMessageBox.question(
+            self, "Remove Device",
+            f"Remove \"{self._device['name']}\"?\nYou will need to pair it again to reconnect.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            _run(["bluetoothctl", "remove", self._device["mac"]])
+            self.action_done.emit()
+
+    def _toggle_trust(self, state):
+        if not self._device:
+            return
+        cmd = "trust" if state == Qt.Checked else "untrust"
+        _run(["bluetoothctl", cmd, self._device["mac"]])
 
 
 class BluetoothTab(QWidget):
     def __init__(self):
         super().__init__()
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("bluetooth tab"))
+        self._load_thread = None
+        self._scan_thread = None
+        self._devices = []
+        self._build_ui()
+        self._load()
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(12)
+
+        header = QHBoxLayout()
+        header.addWidget(QLabel("Bluetooth"))
+        header.addStretch()
+        self._toggle_btn = QPushButton()
+        self._toggle_btn.setFixedWidth(150)
+        self._toggle_btn.clicked.connect(self._toggle_bt)
+        header.addWidget(self._toggle_btn)
+        self._scan_btn = QPushButton("Scan")
+        self._scan_btn.clicked.connect(self._scan)
+        header.addWidget(self._scan_btn)
+        root.addLayout(header)
+
+        self._status_lbl = QLabel("Loading...")
+        root.addWidget(self._status_lbl)
+
+        body = QHBoxLayout()
+        body.setSpacing(0)
+
+        self._list = QListWidget()
+        self._list.setFrameShape(QFrame.NoFrame)
+        self._list.currentRowChanged.connect(self._on_select)
+        body.addWidget(self._list, stretch=1)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        body.addWidget(sep)
+
+        self._detail = _DetailPanel()
+        self._detail.action_done.connect(self._load)
+        body.addWidget(self._detail, stretch=1)
+
+        root.addLayout(body, stretch=1)
+
+    def _refresh_toggle(self):
+        enabled = _bt_enabled()
+        self._toggle_btn.setText("Disable Bluetooth" if enabled else "Enable Bluetooth")
+        self._scan_btn.setEnabled(enabled)
+
+    def _toggle_bt(self):
+        state = "off" if _bt_enabled() else "on"
+        _run(["bluetoothctl", "power", state])
+        self._refresh_toggle()
+        if state == "on":
+            self._load()
+        else:
+            self._list.clear()
+            self._detail.setVisible(False)
+            self._status_lbl.setText("Bluetooth powered off")
+
+    def _load(self):
+        if self._load_thread and self._load_thread.isRunning():
+            return
+        self._refresh_toggle()
+        self._list.clear()
+        self._detail.setVisible(False)
+        self._devices = []
+        self._status_lbl.setText("Loading devices...")
+        self._load_thread = _LoadThread()
+        self._load_thread.done.connect(self._on_done)
+        self._load_thread.error.connect(self._on_error)
+        self._load_thread.start()
+
+    def _scan(self):
+        if self._scan_thread and self._scan_thread.isRunning():
+            return
+        self._scan_btn.setEnabled(False)
+        self._scan_btn.setText("Scanning…")
+        self._status_lbl.setText("Scanning for devices (8s)…")
+        self._scan_thread = _ScanThread()
+        self._scan_thread.done.connect(self._on_scan_done)
+        self._scan_thread.start()
+
+    def _on_scan_done(self):
+        self._scan_btn.setEnabled(True)
+        self._scan_btn.setText("Scan")
+        self._load()
+
+    def _on_done(self, devices):
+        self._devices = devices
+        if not devices:
+            self._status_lbl.setText("No devices found")
+            return
+        paired = sum(1 for d in devices if d["paired"])
+        self._status_lbl.setText(f"{len(devices)} device(s) - {paired} paired")
+        for dev in devices:
+            parts = [dev["name"]]
+            if dev["connected"]:
+                parts.append("Connected")
+            elif dev["paired"]:
+                parts.append("Paired")
+            self._list.addItem(QListWidgetItem(" ".join(parts)))
+
+    def _on_error(self, msg):
+        self._status_lbl.setText(f"Error: {msg}")
+
+    def _on_select(self, row):
+        if 0 <= row < len(self._devices):
+            self._detail.show_device(self._devices[row])
