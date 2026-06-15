@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget
 from wifi_tab import WifiTab
 from bluetooth_tab import BluetoothTab
 from displays_tab import DisplaysTab
+from sound_tab import SoundTab
 
 QSS = """
     * {
@@ -26,6 +27,7 @@ def main():
     tabs.addTab(WifiTab(), "Wi-Fi")
     tabs.addTab(BluetoothTab(), "Bluetooth")
     tabs.addTab(DisplaysTab(), "Displays")
+    tabs.addTab(SoundTab(), "Sound")
 
     window.setCentralWidget(tabs)
     window.show()
