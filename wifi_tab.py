@@ -236,7 +236,7 @@ class _DetailPanel(QWidget):
 
     def _toggle_autoconnect(self, state):
         if self._network:
-            val = "yes" if state == Qt.Checked else "no"
+            val = "yes" if bool(state) else "no"
             _run(["nmcli", "connection", "modify", "id",
                   self._network["ssid"], "connection.autoconnect", val])
 

@@ -207,8 +207,6 @@ class _DetailPanel(QWidget):
         if not self._device:
             return
         if self._device["paired"]:
-            self._run_action(["bluetoothctl", "untrust", self._device["mac"]], "Unpairing…")
-            _run(["bluetoothctl", "untrust", self._device["mac"]])
             self._run_action(["bluetoothctl", "remove", self._device["mac"]], "Removing…")
         else:
             self._run_action(["bluetoothctl", "pair", self._device["mac"]], "Pairing…")
@@ -222,14 +220,14 @@ class _DetailPanel(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            _run(["bluetoothctl", "remove", self._device["mac"]])
-            self.action_done.emit()
+            self._run_action(["bluetoothctl", "remove", self._device["mac"]], "Removing…")
 
     def _toggle_trust(self, state):
         if not self._device:
             return
-        cmd = "trust" if state == Qt.Checked else "untrust"
-        _run(["bluetoothctl", cmd, self._device["mac"]])
+        cmd = "trust" if bool(state) else "untrust"
+        self._run_action(["bluetoothctl", cmd, self._device["mac"]],
+                         "Trusting…" if bool(state) else "Untrusting…")
 
 
 class BluetoothTab(QWidget):

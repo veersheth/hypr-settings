@@ -1,7 +1,7 @@
 import json
 import re
 import subprocess
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget,
@@ -104,7 +104,7 @@ def _parse_dump(dump):
             sources.append(node)
         elif media_class == "Stream/Output/Audio":
             playback.append(node)
-        elif media_class == "Stream/Input/Audio" and "Internal" not in media_class:
+        elif media_class == "Stream/Input/Audio":
             record.append(node)
 
     return {
@@ -164,6 +164,11 @@ class _AppStreamRow(QWidget):
         self._allow_boost = allow_boost
         self._busy = False
 
+        self._vol_timer = QTimer(self)
+        self._vol_timer.setSingleShot(True)
+        self._vol_timer.setInterval(80)
+        self._vol_timer.timeout.connect(self._apply_volume)
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 2, 0, 2)
 
@@ -194,11 +199,14 @@ class _AppStreamRow(QWidget):
     def _on_volume(self, val):
         self._pct_lbl.setText(f"{val}%")
         if not self._busy:
-            _set_volume(self._node_id, val, self._allow_boost)
+            self._vol_timer.start()
+
+    def _apply_volume(self):
+        _set_volume(self._node_id, self._slider.value(), self._allow_boost)
 
     def _on_mute(self, state):
         if not self._busy:
-            _set_mute(self._node_id, state == Qt.Checked)
+            _set_mute(self._node_id, bool(state))
 
 
 # ── main tab ──────────────────────────────────────────────────────────────────
@@ -208,6 +216,14 @@ class SoundTab(QWidget):
         super().__init__()
         self._data = {}
         self._load_thread = None
+        self._sink_vol_timer = QTimer(self)
+        self._sink_vol_timer.setSingleShot(True)
+        self._sink_vol_timer.setInterval(80)
+        self._sink_vol_timer.timeout.connect(self._apply_sink_volume)
+        self._source_vol_timer = QTimer(self)
+        self._source_vol_timer.setSingleShot(True)
+        self._source_vol_timer.setInterval(80)
+        self._source_vol_timer.timeout.connect(self._apply_source_volume)
         self._build_ui()
         self._load()
 
@@ -377,16 +393,19 @@ class SoundTab(QWidget):
 
     def _on_sink_volume(self, val):
         self._sink_vol_lbl.setText(f"{val}%")
+        self._sink_vol_timer.start()
+
+    def _apply_sink_volume(self):
         idx = self._sink_combo.currentIndex()
         sinks = self._data.get("sinks", [])
         if 0 <= idx < len(sinks):
-            _set_volume(sinks[idx]["id"], val, allow_boost=True)
+            _set_volume(sinks[idx]["id"], self._sink_slider.value(), allow_boost=True)
 
     def _on_sink_mute(self, state):
         idx = self._sink_combo.currentIndex()
         sinks = self._data.get("sinks", [])
         if 0 <= idx < len(sinks):
-            _set_mute(sinks[idx]["id"], state == Qt.Checked)
+            _set_mute(sinks[idx]["id"], bool(state))
 
     # ── source controls ───────────────────────────────────────────────────────
 
@@ -412,16 +431,19 @@ class SoundTab(QWidget):
 
     def _on_source_volume(self, val):
         self._source_vol_lbl.setText(f"{val}%")
+        self._source_vol_timer.start()
+
+    def _apply_source_volume(self):
         idx = self._source_combo.currentIndex()
         sources = self._data.get("sources", [])
         if 0 <= idx < len(sources):
-            _set_volume(sources[idx]["id"], val, allow_boost=False)
+            _set_volume(sources[idx]["id"], self._source_slider.value(), allow_boost=False)
 
     def _on_source_mute(self, state):
         idx = self._source_combo.currentIndex()
         sources = self._data.get("sources", [])
         if 0 <= idx < len(sources):
-            _set_mute(sources[idx]["id"], state == Qt.Checked)
+            _set_mute(sources[idx]["id"], bool(state))
 
     # ── application streams ───────────────────────────────────────────────────
 
