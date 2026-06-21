@@ -6,18 +6,11 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
-
-
-def _run(cmd):
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        return r.stdout.strip(), r.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return "", False
+from common import run, separator
 
 
 def _bt_enabled():
-    out, _ = _run(["bluetoothctl", "show"])
+    out, _ = run(["bluetoothctl", "show"])
     return "Powered: yes" in out
 
 
@@ -32,7 +25,7 @@ def _parse_devices(out):
 
 
 def _device_info(mac):
-    out, _ = _run(["bluetoothctl", "info", mac])
+    out, _ = run(["bluetoothctl", "info", mac])
     info = {"mac": mac, "name": mac, "paired": False,
             "connected": False, "trusted": False, "icon": ""}
     for line in out.splitlines():
@@ -58,7 +51,7 @@ class _LoadThread(QThread):
         if not _bt_enabled():
             self.error.emit("Bluetooth is powered off")
             return
-        out, _ = _run(["bluetoothctl", "devices"])
+        out, _ = run(["bluetoothctl", "devices"])
         macs = list(_parse_devices(out).keys())
         devices = [_device_info(mac) for mac in macs]
         devices.sort(key=lambda d: (-d["connected"], -d["paired"], d["name"].lower()))
@@ -78,7 +71,7 @@ class _ScanThread(QThread):
             proc.wait(timeout=4)
         except subprocess.TimeoutExpired:
             proc.terminate()
-        _run(["bluetoothctl", "scan", "off"])
+        run(["bluetoothctl", "scan", "off"])
         self.done.emit()
 
 
@@ -90,15 +83,8 @@ class _ActionThread(QThread):
         self._cmd = cmd
 
     def run(self):
-        out, ok = _run(self._cmd)
+        out, ok = run(self._cmd)
         self.done.emit(ok, out)
-
-
-def _separator():
-    f = QFrame()
-    f.setFrameShape(QFrame.HLine)
-    f.setFixedHeight(1)
-    return f
 
 
 class _DetailPanel(QWidget):
@@ -122,20 +108,20 @@ class _DetailPanel(QWidget):
         root.addWidget(self._mac_lbl)
         root.addWidget(self._icon_lbl)
 
-        root.addWidget(_separator())
+        root.addWidget(separator())
 
         self._paired_lbl = QLabel()
         self._connected_lbl = QLabel()
         root.addWidget(self._paired_lbl)
         root.addWidget(self._connected_lbl)
 
-        root.addWidget(_separator())
+        root.addWidget(separator())
 
         self._trust_cb = QCheckBox("Trusted")
         self._trust_cb.stateChanged.connect(self._toggle_trust)
         root.addWidget(self._trust_cb)
 
-        root.addWidget(_separator())
+        root.addWidget(separator())
 
         btn_row = QHBoxLayout()
         self._connect_btn = QPushButton()
@@ -294,7 +280,7 @@ class BluetoothTab(QWidget):
 
     def _toggle_bt(self):
         state = "off" if _bt_enabled() else "on"
-        _run(["bluetoothctl", "power", state])
+        run(["bluetoothctl", "power", state])
         self._refresh_toggle()
         if state == "on":
             self._load()

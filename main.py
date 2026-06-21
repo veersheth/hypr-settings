@@ -16,8 +16,6 @@ TEXT        = "#d8d8d8"   # default text
 TEXT_BRIGHT = "#f0f0f0"   # headings, active labels
 TEXT_DIM    = "#b0b0b0"   # section titles, secondary info
 TEXT_MUTED  = "#707070"   # status labels, placeholders
-TEXT_ACTIVE = "#000000"   # text on white (selected tab/item)
-
 BORDER      = "#545454"   # default border (buttons, inputs)
 BORDER_HOVER = "#787878"  # border on hover
 BORDER_FOCUS = "#aaaaaa"  # border on focus
@@ -37,8 +35,7 @@ FONT_MD     = "16px"      # section titles
 FONT_LG     = "18px"      # detail panel titles
 FONT_XL     = "22px"      # page titles
 
-def _qss():
-    return f"""
+QSS = f"""
 QWidget {{
     background-color: {BG};
     color: {TEXT};
@@ -104,6 +101,10 @@ QLabel#detailTitle {{
 QLabel#statusLabel {{
     color: {TEXT_MUTED};
     font-size: {FONT_SM};
+}}
+
+QLabel#fieldLabel {{
+    color: {TEXT_DIM};
 }}
 
 QPushButton {{
@@ -317,8 +318,6 @@ QScrollArea {{
     background: transparent;
 }}
 """
-
-QSS = _qss()
 
 
 def main():

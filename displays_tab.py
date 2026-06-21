@@ -1,25 +1,17 @@
 import json
-import subprocess
 from PySide6.QtCore import Qt, QRect, QPoint, Signal
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout,
     QLabel, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
+from common import run, separator
 
 COLORS = ["#2a5298", "#7b2d8b", "#1e7a4a", "#8b4513", "#1a6b8a", "#6b1a3a"]
 
 
-def _run(cmd):
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        return r.stdout.strip(), r.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return "", False
-
-
 def _load_monitors():
-    out, ok = _run(["hyprctl", "monitors", "all", "-j"])
+    out, ok = run(["hyprctl", "monitors", "all", "-j"])
     if not ok or not out:
         return None, "hyprctl not available — are you running Hyprland?"
     try:
@@ -44,14 +36,7 @@ def _apply_monitor(m):
     )
     if m.get("mirror"):
         value += f",mirror,{m['mirror']}"
-    return _run(["hyprctl", "keyword", "monitor", value])
-
-
-def _separator():
-    f = QFrame()
-    f.setFrameShape(QFrame.HLine)
-    f.setFixedHeight(1)
-    return f
+    return run(["hyprctl", "keyword", "monitor", value])
 
 
 def _logical_size(m):
@@ -183,12 +168,13 @@ class _SettingsPanel(QWidget):
         self._desc_lbl.setWordWrap(True)
         root.addWidget(self._desc_lbl)
 
-        root.addWidget(_separator())
+        root.addWidget(separator())
 
         def row(label, widget):
             h = QHBoxLayout()
             lbl = QLabel(label)
             lbl.setFixedWidth(110)
+            lbl.setObjectName("fieldLabel")
             h.addWidget(lbl)
             h.addWidget(widget, stretch=1)
             root.addLayout(h)
@@ -203,7 +189,7 @@ class _SettingsPanel(QWidget):
         self._pos_y.valueChanged.connect(self._on_pos)
         row("Position Y", self._pos_y)
 
-        root.addWidget(_separator())
+        root.addWidget(separator())
 
         self._mirror_cb = QComboBox()
         self._mirror_cb.currentIndexChanged.connect(self._on_mirror)

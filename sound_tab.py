@@ -1,23 +1,15 @@
 import json
 import re
-import subprocess
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget,
 )
-
-
-def _run(cmd):
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        return r.stdout.strip(), r.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return "", False
+from common import run, separator
 
 
 def _pw_dump():
-    out, ok = _run(["pw-dump"])
+    out, ok = run(["pw-dump"])
     if not ok or not out:
         return None
     try:
@@ -28,7 +20,7 @@ def _pw_dump():
 
 def _get_volume(node_id):
     """Returns (volume_pct: int, muted: bool) — (0, False) on failure."""
-    out, ok = _run(["wpctl", "get-volume", str(node_id)])
+    out, ok = run(["wpctl", "get-volume", str(node_id)])
     if not ok:
         return 0, False
     # "Volume: 0.80" or "Volume: 0.80 [MUTED]"
@@ -43,11 +35,11 @@ def _set_volume(node_id, pct, allow_boost=False):
     if allow_boost:
         cmd += ["-l", "1.5"]
     cmd += [str(node_id), f"{pct}%"]
-    _run(cmd)
+    run(cmd)
 
 
 def _set_mute(node_id, muted):
-    _run(["wpctl", "set-mute", str(node_id), "1" if muted else "0"])
+    run(["wpctl", "set-mute", str(node_id), "1" if muted else "0"])
 
 
 def _parse_dump(dump):
@@ -137,13 +129,6 @@ class _LoadThread(QThread):
 
 # ── widgets ───────────────────────────────────────────────────────────────────
 
-def _separator():
-    f = QFrame()
-    f.setFrameShape(QFrame.HLine)
-    f.setFixedHeight(1)
-    return f
-
-
 def _section_label(text):
     lbl = QLabel(text)
     lbl.setObjectName("sectionTitle")
@@ -153,7 +138,7 @@ def _section_label(text):
 def _fixed_label(text, width=72):
     lbl = QLabel(text)
     lbl.setFixedWidth(width)
-    lbl.setStyleSheet("color: #888888;")
+    lbl.setObjectName("fieldLabel")
     return lbl
 
 
@@ -247,7 +232,7 @@ class SoundTab(QWidget):
         self._status_lbl = QLabel("Loading…")
         self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
-        root.addWidget(_separator())
+        root.addWidget(separator())
 
         # OUTPUT
         root.addWidget(_section_label("Output"))
@@ -274,7 +259,7 @@ class SoundTab(QWidget):
         out_vol.addWidget(self._sink_mute_cb)
         root.addLayout(out_vol)
 
-        root.addWidget(_separator())
+        root.addWidget(separator())
 
         # INPUT
 
@@ -302,7 +287,7 @@ class SoundTab(QWidget):
         in_vol.addWidget(self._source_mute_cb)
         root.addLayout(in_vol)
 
-        root.addWidget(_separator())
+        root.addWidget(separator())
 
         # APPS
         root.addWidget(_section_label("Applications"))
@@ -394,7 +379,7 @@ class SoundTab(QWidget):
     def _on_sink_change(self, idx):
         sinks = self._data.get("sinks", [])
         if 0 <= idx < len(sinks):
-            _run(["wpctl", "set-default", str(sinks[idx]["id"])])
+            run(["wpctl", "set-default", str(sinks[idx]["id"])])
             self._refresh_sink_controls()
 
     def _on_sink_volume(self, val):
@@ -432,7 +417,7 @@ class SoundTab(QWidget):
     def _on_source_change(self, idx):
         sources = self._data.get("sources", [])
         if 0 <= idx < len(sources):
-            _run(["wpctl", "set-default", str(sources[idx]["id"])])
+            run(["wpctl", "set-default", str(sources[idx]["id"])])
             self._refresh_source_controls()
 
     def _on_source_volume(self, val):

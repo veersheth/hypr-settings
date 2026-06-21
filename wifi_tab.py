@@ -1,26 +1,15 @@
 import re
-import subprocess
-import threading
-from PySide6.QtCore import Qt, QMetaObject, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
-
-
-# uses nmcli 
-
-def _run(cmd):
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        return r.stdout.strip(), r.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return "", False
+from common import run, separator
 
 
 def _wifi_device():
-    out, _ = _run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device"])
+    out, _ = run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device"])
     for line in out.splitlines():
         parts = line.split(":")
         if len(parts) >= 2 and parts[1] == "wifi":
@@ -29,17 +18,17 @@ def _wifi_device():
 
 
 def _wifi_enabled():
-    out, _ = _run(["nmcli", "radio", "wifi"])
+    out, _ = run(["nmcli", "radio", "wifi"])
     return out.strip() == "enabled"
 
 
 def _saved_connection(ssid):
-    out, _ = _run(["nmcli", "-t", "-f", "NAME", "connection", "show"])
+    out, _ = run(["nmcli", "-t", "-f", "NAME", "connection", "show"])
     return ssid in out.splitlines()
 
 
 def _get_autoconnect(ssid):
-    out, _ = _run(["nmcli", "-t", "-f", "connection.autoconnect",
+    out, _ = run(["nmcli", "-t", "-f", "connection.autoconnect",
                    "connection", "show", "id", ssid])
     for line in out.splitlines():
         if line.startswith("connection.autoconnect:"):
@@ -48,7 +37,7 @@ def _get_autoconnect(ssid):
 
 
 def _get_connection_info(device):
-    out, _ = _run(["nmcli", "-t", "-f", "IP4.ADDRESS,IP4.GATEWAY,IP4.DNS",
+    out, _ = run(["nmcli", "-t", "-f", "IP4.ADDRESS,IP4.GATEWAY,IP4.DNS",
                    "device", "show", device])
     info = {}
     dns_entries = []
@@ -104,7 +93,7 @@ class _ScanThread(QThread):
     error = Signal(str)
 
     def run(self):
-        out, ok = _run(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,ACTIVE",
+        out, ok = run(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,ACTIVE",
                          "device", "wifi", "list", "--rescan", "auto"])
         if not ok and not out:
             self.error.emit("nmcli unavailable — is NetworkManager running?")
@@ -127,17 +116,8 @@ class _ConnectThread(QThread):
         self._cmd = cmd
 
     def run(self):
-        out, ok = _run(self._cmd)
+        out, ok = run(self._cmd)
         self.done.emit(ok, out)
-
-
-# dets
-
-def _separator():
-    f = QFrame()
-    f.setFrameShape(QFrame.HLine)
-    f.setFixedHeight(1)
-    return f
 
 
 class _DetailPanel(QWidget):
@@ -163,7 +143,7 @@ class _DetailPanel(QWidget):
         root.addWidget(self._security_lbl)
 
         # Connection details (connected only)
-        self._conn_sep = _separator()
+        self._conn_sep = separator()
         root.addWidget(self._conn_sep)
         self._ip_lbl = QLabel()
         self._subnet_lbl = QLabel()
@@ -173,14 +153,14 @@ class _DetailPanel(QWidget):
             root.addWidget(w)
 
         # Auto-connect (saved networks)
-        self._auto_sep = _separator()
+        self._auto_sep = separator()
         root.addWidget(self._auto_sep)
         self._autoconnect_cb = QCheckBox("Auto-connect")
         self._autoconnect_cb.stateChanged.connect(self._toggle_autoconnect)
         root.addWidget(self._autoconnect_cb)
 
         # Actions
-        root.addWidget(_separator())
+        root.addWidget(separator())
         btn_row = QHBoxLayout()
         self._connect_btn = QPushButton()
         self._connect_btn.clicked.connect(self._on_connect)
@@ -238,7 +218,7 @@ class _DetailPanel(QWidget):
     def _toggle_autoconnect(self, state):
         if self._network:
             val = "yes" if bool(state) else "no"
-            _run(["nmcli", "connection", "modify", "id",
+            run(["nmcli", "connection", "modify", "id",
                   self._network["ssid"], "connection.autoconnect", val])
 
     def _on_connect(self):
@@ -248,7 +228,7 @@ class _DetailPanel(QWidget):
 
         if net["connected"]:
             self._set_status("Disconnecting…")
-            _run(["nmcli", "connection", "down", "id", net["ssid"]])
+            run(["nmcli", "connection", "down", "id", net["ssid"]])
             self.action_done.emit()
             return
 
@@ -291,7 +271,7 @@ class _DetailPanel(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            _run(["nmcli", "connection", "delete", "id", net["ssid"]])
+            run(["nmcli", "connection", "delete", "id", net["ssid"]])
             self.action_done.emit()
 
     def _set_status(self, text):
@@ -372,7 +352,7 @@ class WifiTab(QWidget):
 
     def _toggle_wifi(self):
         state = "off" if _wifi_enabled() else "on"
-        _run(["nmcli", "radio", "wifi", state])
+        run(["nmcli", "radio", "wifi", state])
         self._refresh_toggle()
         if state == "on":
             self._scan()
