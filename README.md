@@ -2,8 +2,6 @@
 
 A PySide6 settings GUI for Hyprland / Wayland desktops. 
 
-Features
-
 - WiFi
   - Requires nmcli (NetworkManager)
   - Connect / disconnect / forget known networks
@@ -32,7 +30,8 @@ Features
 
 Running
 ```bash
-  $ ./run
+  ./run
 ```
-Requires nix-shell with pyside6 available (see shell.nix).
+
+Requires nix-shell with pyside6 available (see shell.nix)
 
