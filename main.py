@@ -112,7 +112,7 @@ QPushButton {{
     color: #cccccc;
     border: 1px solid {BORDER};
     border-radius: {RADIUS};
-    padding: 5px 16px;
+    padding: 5px 5px;
     min-height: 26px;
     min-width: 60px;
 }}
