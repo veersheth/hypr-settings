@@ -193,6 +193,9 @@ class _AppStreamRow(QWidget):
         if not self._busy:
             _set_mute(self._node_id, bool(state))
 
+    def reset_volume(self):
+        self._slider.setValue(100)
+
 
 # main
 
@@ -201,6 +204,7 @@ class SoundTab(QWidget):
         super().__init__()
         self._data = {}
         self._load_thread = None
+        self._app_rows = []
         self._sink_vol_timer = QTimer(self)
         self._sink_vol_timer.setSingleShot(True)
         self._sink_vol_timer.setInterval(80)
@@ -290,7 +294,15 @@ class SoundTab(QWidget):
         root.addWidget(separator())
 
         # APPS
-        root.addWidget(_section_label("Applications"))
+        apps_header = QHBoxLayout()
+        apps_header.addWidget(_section_label("Applications"))
+        apps_header.addStretch()
+        self._reset_btn = QPushButton("Reset to 100%")
+        self._reset_btn.setEnabled(False)
+        self._reset_btn.clicked.connect(self._reset_app_volumes)
+        apps_header.addWidget(self._reset_btn)
+        root.addLayout(apps_header)
+
         self._apps_status = QLabel("No active streams")
         root.addWidget(self._apps_status)
 
@@ -438,18 +450,27 @@ class SoundTab(QWidget):
 
     # app streams
 
+    def _reset_app_volumes(self):
+        for row in self._app_rows:
+            row.reset_volume()
+
     def _populate_apps(self, playback, record):
         while self._apps_layout.count():
             item = self._apps_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
+        self._app_rows = []
         streams = [(n, True) for n in playback] + [(n, False) for n in record]
         if not streams:
             self._apps_status.setText("No active streams")
+            self._reset_btn.setEnabled(False)
             return
 
         self._apps_status.setText(f"{len(streams)} active stream(s)")
         for node, is_playback in streams:
-            self._apps_layout.addWidget(_AppStreamRow(node, allow_boost=is_playback))
+            row = _AppStreamRow(node, allow_boost=is_playback)
+            self._app_rows.append(row)
+            self._apps_layout.addWidget(row)
         self._apps_layout.addStretch()
+        self._reset_btn.setEnabled(True)
