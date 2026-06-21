@@ -2,10 +2,10 @@ import re
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMessageBox, QPushButton,
+    QListWidgetItem, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
-from common import run, separator
+from common import run, separator, NavList
 
 
 def _wifi_device():
@@ -322,7 +322,7 @@ class WifiTab(QWidget):
         left = QVBoxLayout()
         left.setSpacing(6)
         left.setContentsMargins(0, 0, 16, 0)
-        self._list = QListWidget()
+        self._list = NavList()
         self._list.setFrameShape(QFrame.NoFrame)
         self._list.currentRowChanged.connect(self._on_select)
         left.addWidget(self._list)

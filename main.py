@@ -1,5 +1,5 @@
 import sys
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget
 
 from wifi_tab import WifiTab
@@ -337,6 +337,11 @@ def main():
     tabs.addTab(DisplaysTab(), "Displays")
     tabs.addTab(SoundTab(), "Sound")
     tabs.addTab(SystemTab(), "System")
+
+    for i in range(tabs.count()):
+        QShortcut(QKeySequence(f"Alt+{i + 1}"), window).activated.connect(
+            lambda idx=i: tabs.setCurrentIndex(idx)
+        )
 
     window.setCentralWidget(tabs)
     window.show()

@@ -3,10 +3,10 @@ import subprocess
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QLabel,
-    QListWidget, QListWidgetItem, QMessageBox, QPushButton,
+    QListWidgetItem, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
-from common import run, separator
+from common import run, separator, NavList
 
 
 def _bt_enabled():
@@ -253,7 +253,7 @@ class BluetoothTab(QWidget):
         body = QHBoxLayout()
         body.setSpacing(0)
 
-        self._list = QListWidget()
+        self._list = NavList()
         self._list.setFrameShape(QFrame.NoFrame)
         self._list.currentRowChanged.connect(self._on_select)
 
