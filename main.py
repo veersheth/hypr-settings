@@ -6,6 +6,7 @@ from wifi_tab import WifiTab
 from bluetooth_tab import BluetoothTab
 from displays_tab import DisplaysTab
 from sound_tab import SoundTab
+from system_tab import SystemTab
 
 BG          = "#0d0d0d"   # primary background
 BG_RAISED   = "#111111"   # inputs, list, slightly lifted surfaces
@@ -335,6 +336,7 @@ def main():
     tabs.addTab(BluetoothTab(), "Bluetooth")
     tabs.addTab(DisplaysTab(), "Displays")
     tabs.addTab(SoundTab(), "Sound")
+    tabs.addTab(SystemTab(), "System")
 
     window.setCentralWidget(tabs)
     window.show()
