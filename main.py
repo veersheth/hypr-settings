@@ -15,7 +15,7 @@ BG_PRESS    = "#080808"   # pressed state background
 TEXT        = "#d8d8d8"   # default text
 TEXT_BRIGHT = "#f0f0f0"   # headings, active labels
 TEXT_DIM    = "#b0b0b0"   # section titles, secondary info
-TEXT_MUTED  = "#505050"   # status labels, placeholders
+TEXT_MUTED  = "#707070"   # status labels, placeholders
 TEXT_ACTIVE = "#000000"   # text on white (selected tab/item)
 
 BORDER      = "#545454"   # default border (buttons, inputs)
@@ -28,14 +28,14 @@ SEP         = "#232323"   # separator lines
 ACTIVE_BG   = "#ffffff"   # selected tab / list item background
 ACTIVE_TEXT = "#000000"   # text on ACTIVE_BG
 
-RADIUS      = "6px"       # standard border radius
-RADIUS_LG   = "8px"       # larger radius (list widget)
+RADIUS      = "4px"       # standard border radius
+RADIUS_LG   = "6px"       # larger radius (list widget)
 
 FONT_SIZE   = "16px"      # base font size
-FONT_SM     = "12px"      # small / status text
-FONT_MD     = "13px"      # section titles
-FONT_LG     = "14px"      # detail panel titles
-FONT_XL     = "17px"      # page titles
+FONT_SM     = "16px"      # small / status text
+FONT_MD     = "16px"      # section titles
+FONT_LG     = "18px"      # detail panel titles
+FONT_XL     = "22px"      # page titles
 
 def _qss():
     return f"""
