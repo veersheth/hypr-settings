@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
 set -e
 cd "$(dirname "$0")"
+
+if [[ "$1" == "--install" ]]; then
+    read -rp "Install hypr-settings to user profile via nix-env? [y/N] " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+        nix-env -i -f default.nix
+        echo "Installed. Run: hypr-settings"
+    else
+        echo "Aborted."
+    fi
+    exit 0
+fi
+
 exec nix-shell shell.nix --run "python main.py"
