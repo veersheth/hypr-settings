@@ -10,8 +10,6 @@ from PySide6.QtWidgets import (
 COLORS = ["#2a5298", "#7b2d8b", "#1e7a4a", "#8b4513", "#1a6b8a", "#6b1a3a"]
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
 def _run(cmd):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -28,6 +26,7 @@ def _load_monitors():
         monitors = json.loads(out)
     except json.JSONDecodeError:
         return None, "Failed to parse hyprctl output"
+
     # Normalize mirrorOf ("none" string → None, name → name)
     for m in monitors:
         raw = m.get("mirrorOf", "none")
@@ -51,6 +50,7 @@ def _apply_monitor(m):
 def _separator():
     f = QFrame()
     f.setFrameShape(QFrame.HLine)
+    f.setFixedHeight(1)
     return f
 
 
@@ -59,7 +59,7 @@ def _logical_size(m):
     return int(m["width"] / s), int(m["height"] / s)
 
 
-# ── canvas ────────────────────────────────────────────────────────────────────
+# canvas
 
 class _MonitorCanvas(QWidget):
     monitor_selected = Signal(object)
@@ -114,7 +114,7 @@ class _MonitorCanvas(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor("#1c1c1c"))
+        p.fillRect(self.rect(), QColor("#080808"))
         for i, m in enumerate(self._monitors):
             rect = self._rect(m)
             color = QColor(COLORS[i % len(COLORS)])
@@ -162,7 +162,7 @@ class _MonitorCanvas(QWidget):
         self.update()
 
 
-# ── settings panel ────────────────────────────────────────────────────────────
+# settings 
 
 class _SettingsPanel(QWidget):
     def __init__(self):
@@ -171,12 +171,12 @@ class _SettingsPanel(QWidget):
         self._busy = False
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 0, 0, 0)
+        root.setContentsMargins(20, 4, 0, 0)
         root.setSpacing(8)
         root.setAlignment(Qt.AlignTop)
 
         self._name_lbl = QLabel()
-        self._name_lbl.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self._name_lbl.setObjectName("detailTitle")
         root.addWidget(self._name_lbl)
 
         self._desc_lbl = QLabel()
@@ -261,7 +261,7 @@ class _SettingsPanel(QWidget):
         self._set_position_enabled(not bool(target))
 
 
-# ── main tab ──────────────────────────────────────────────────────────────────
+# main tab
 
 class DisplaysTab(QWidget):
     def __init__(self):
@@ -272,10 +272,13 @@ class DisplaysTab(QWidget):
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
         header = QHBoxLayout()
-        header.addWidget(QLabel("Displays"))
+        header.setSpacing(8)
+        title = QLabel("Displays")
+        title.setObjectName("pageTitle")
+        header.addWidget(title)
         header.addStretch()
         self._apply_btn = QPushButton("Apply")
         self._apply_btn.clicked.connect(self._apply)
@@ -286,18 +289,23 @@ class DisplaysTab(QWidget):
         root.addLayout(header)
 
         self._status_lbl = QLabel("Loading…")
+        self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
 
         body = QHBoxLayout()
         body.setSpacing(0)
 
+        canvas_wrap = QVBoxLayout()
+        canvas_wrap.setContentsMargins(0, 0, 16, 0)
         self._canvas = _MonitorCanvas()
         self._canvas.monitor_selected.connect(self._on_select)
         self._canvas.monitor_moved.connect(self._on_monitor_moved)
-        body.addWidget(self._canvas, stretch=3)
+        canvas_wrap.addWidget(self._canvas)
+        body.addLayout(canvas_wrap, stretch=3)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
+        sep.setFixedWidth(1)
         body.addWidget(sep)
 
         self._settings = _SettingsPanel()

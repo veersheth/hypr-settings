@@ -8,8 +8,6 @@ from PySide6.QtWidgets import (
 )
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
 def _run(cmd):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -117,7 +115,7 @@ def _parse_dump(dump):
     }
 
 
-# ── background loader ─────────────────────────────────────────────────────────
+# load in bg
 
 class _LoadThread(QThread):
     done = Signal(dict)
@@ -142,18 +140,20 @@ class _LoadThread(QThread):
 def _separator():
     f = QFrame()
     f.setFrameShape(QFrame.HLine)
+    f.setFixedHeight(1)
     return f
 
 
 def _section_label(text):
     lbl = QLabel(text)
-    lbl.setStyleSheet("font-weight: bold; font-size: 16px;")
+    lbl.setObjectName("sectionTitle")
     return lbl
 
 
-def _fixed_label(text, width=70):
+def _fixed_label(text, width=72):
     lbl = QLabel(text)
     lbl.setFixedWidth(width)
+    lbl.setStyleSheet("color: #888888;")
     return lbl
 
 
@@ -209,7 +209,7 @@ class _AppStreamRow(QWidget):
             _set_mute(self._node_id, bool(state))
 
 
-# ── main tab ──────────────────────────────────────────────────────────────────
+# main
 
 class SoundTab(QWidget):
     def __init__(self):
@@ -230,11 +230,14 @@ class SoundTab(QWidget):
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
         # Header
         header = QHBoxLayout()
-        header.addWidget(QLabel("Sound"))
+        header.setSpacing(8)
+        title = QLabel("Sound")
+        title.setObjectName("pageTitle")
+        header.addWidget(title)
         header.addStretch()
         self._reload_btn = QPushButton("Reload")
         self._reload_btn.clicked.connect(self._load)
@@ -242,10 +245,11 @@ class SoundTab(QWidget):
         root.addLayout(header)
 
         self._status_lbl = QLabel("Loading…")
+        self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
         root.addWidget(_separator())
 
-        # ── Output ───────────────────────────────────────────────────────────
+        # OUTPUT
         root.addWidget(_section_label("Output"))
 
         out_dev = QHBoxLayout()
@@ -272,7 +276,8 @@ class SoundTab(QWidget):
 
         root.addWidget(_separator())
 
-        # ── Input ────────────────────────────────────────────────────────────
+        # INPUT
+
         root.addWidget(_section_label("Input"))
 
         in_dev = QHBoxLayout()
@@ -299,7 +304,7 @@ class SoundTab(QWidget):
 
         root.addWidget(_separator())
 
-        # ── Applications ──────────────────────────────────────────────────────
+        # APPS
         root.addWidget(_section_label("Applications"))
         self._apps_status = QLabel("No active streams")
         root.addWidget(self._apps_status)
@@ -318,7 +323,8 @@ class SoundTab(QWidget):
 
         root.addStretch()
 
-    # ── loading ───────────────────────────────────────────────────────────────
+
+    # is loading
 
     def _load(self):
         if self._load_thread and self._load_thread.isRunning():
@@ -369,7 +375,7 @@ class SoundTab(QWidget):
             f"{len(sinks)} output(s)  ·  {len(sources)} input(s)"
         )
 
-    # ── sink controls ─────────────────────────────────────────────────────────
+    # sink controls
 
     def _refresh_sink_controls(self):
         idx = self._sink_combo.currentIndex()
@@ -407,7 +413,7 @@ class SoundTab(QWidget):
         if 0 <= idx < len(sinks):
             _set_mute(sinks[idx]["id"], bool(state))
 
-    # ── source controls ───────────────────────────────────────────────────────
+    # sources
 
     def _refresh_source_controls(self):
         idx = self._source_combo.currentIndex()
@@ -445,7 +451,7 @@ class SoundTab(QWidget):
         if 0 <= idx < len(sources):
             _set_mute(sources[idx]["id"], bool(state))
 
-    # ── application streams ───────────────────────────────────────────────────
+    # app streams
 
     def _populate_apps(self, playback, record):
         while self._apps_layout.count():

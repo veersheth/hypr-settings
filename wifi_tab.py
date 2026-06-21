@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 
-# ── nmcli helpers ────────────────────────────────────────────────────────────
+# uses nmcli 
 
 def _run(cmd):
     try:
@@ -97,7 +97,7 @@ def _parse_nmcli_line(line):
     }
 
 
-# ── background threads ────────────────────────────────────────────────────────
+# threads
 
 class _ScanThread(QThread):
     done = Signal(list)
@@ -131,11 +131,12 @@ class _ConnectThread(QThread):
         self.done.emit(ok, out)
 
 
-# ── detail panel ──────────────────────────────────────────────────────────────
+# dets
 
 def _separator():
     f = QFrame()
     f.setFrameShape(QFrame.HLine)
+    f.setFixedHeight(1)
     return f
 
 
@@ -148,13 +149,13 @@ class _DetailPanel(QWidget):
         self._device = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 0, 0, 0)
-        root.setSpacing(10)
+        root.setContentsMargins(20, 4, 0, 0)
+        root.setSpacing(8)
         root.setAlignment(Qt.AlignTop)
 
         # Network identity
         self._ssid_lbl = QLabel()
-        self._ssid_lbl.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self._ssid_lbl.setObjectName("detailTitle")
         root.addWidget(self._ssid_lbl)
         self._signal_lbl = QLabel()
         self._security_lbl = QLabel()
@@ -297,7 +298,7 @@ class _DetailPanel(QWidget):
         self._status_lbl.setText(text)
 
 
-# ── main tab ─────────────────────────────────────────────────────────────────
+# main
 
 class WifiTab(QWidget):
     def __init__(self):
@@ -311,11 +312,14 @@ class WifiTab(QWidget):
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
         # Header row
         header = QHBoxLayout()
-        header.addWidget(QLabel("Wi-Fi"))
+        header.setSpacing(8)
+        title = QLabel("Wi-Fi")
+        title.setObjectName("pageTitle")
+        header.addWidget(title)
         header.addStretch()
         self._toggle_btn = QPushButton()
         self._toggle_btn.setFixedWidth(120)
@@ -327,6 +331,7 @@ class WifiTab(QWidget):
         root.addLayout(header)
 
         self._status_lbl = QLabel("Scanning…")
+        self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
 
         # Body
@@ -335,7 +340,8 @@ class WifiTab(QWidget):
 
         # Left: network list + hidden network button
         left = QVBoxLayout()
-        left.setSpacing(8)
+        left.setSpacing(6)
+        left.setContentsMargins(0, 0, 16, 0)
         self._list = QListWidget()
         self._list.setFrameShape(QFrame.NoFrame)
         self._list.currentRowChanged.connect(self._on_select)
@@ -349,6 +355,7 @@ class WifiTab(QWidget):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
+        sep.setFixedWidth(1)
         body.addWidget(sep)
 
         # Right: detail panel
@@ -434,3 +441,4 @@ class WifiTab(QWidget):
         t.done.connect(lambda ok, _: self._scan())
         t.start()
         self._connect_thread = t
+

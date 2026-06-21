@@ -75,7 +75,7 @@ class _ScanThread(QThread):
                 ["bluetoothctl", "scan", "on"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            proc.wait(timeout=8)
+            proc.wait(timeout=4)
         except subprocess.TimeoutExpired:
             proc.terminate()
         _run(["bluetoothctl", "scan", "off"])
@@ -97,6 +97,7 @@ class _ActionThread(QThread):
 def _separator():
     f = QFrame()
     f.setFrameShape(QFrame.HLine)
+    f.setFixedHeight(1)
     return f
 
 
@@ -108,12 +109,12 @@ class _DetailPanel(QWidget):
         self._device = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 0, 0, 0)
-        root.setSpacing(10)
+        root.setContentsMargins(20, 4, 0, 0)
+        root.setSpacing(8)
         root.setAlignment(Qt.AlignTop)
 
         self._name_lbl = QLabel()
-        self._name_lbl.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self._name_lbl.setObjectName("detailTitle")
         root.addWidget(self._name_lbl)
 
         self._mac_lbl = QLabel()
@@ -242,10 +243,13 @@ class BluetoothTab(QWidget):
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(12)
+        root.setSpacing(10)
 
         header = QHBoxLayout()
-        header.addWidget(QLabel("Bluetooth"))
+        header.setSpacing(8)
+        title = QLabel("Bluetooth")
+        title.setObjectName("pageTitle")
+        header.addWidget(title)
         header.addStretch()
         self._toggle_btn = QPushButton()
         self._toggle_btn.setFixedWidth(150)
@@ -257,6 +261,7 @@ class BluetoothTab(QWidget):
         root.addLayout(header)
 
         self._status_lbl = QLabel("Loading...")
+        self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
 
         body = QHBoxLayout()
@@ -265,10 +270,15 @@ class BluetoothTab(QWidget):
         self._list = QListWidget()
         self._list.setFrameShape(QFrame.NoFrame)
         self._list.currentRowChanged.connect(self._on_select)
-        body.addWidget(self._list, stretch=1)
+
+        list_wrap = QVBoxLayout()
+        list_wrap.setContentsMargins(0, 0, 16, 0)
+        list_wrap.addWidget(self._list)
+        body.addLayout(list_wrap, stretch=1)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
+        sep.setFixedWidth(1)
         body.addWidget(sep)
 
         self._detail = _DetailPanel()
