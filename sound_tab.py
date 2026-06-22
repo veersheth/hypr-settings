@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget,
 )
-from common import run, separator
+from common import run, separator, make_centered
 
 
 def _pw_dump():
@@ -217,7 +217,7 @@ class SoundTab(QWidget):
         self._load()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        root = QVBoxLayout(make_centered(self))
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(10)
 

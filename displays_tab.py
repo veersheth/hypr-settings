@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout,
     QLabel, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
-from common import run, separator
+from common import run, separator, make_centered
 
 COLORS = ["#2a5298", "#7b2d8b", "#1e7a4a", "#8b4513", "#1a6b8a", "#6b1a3a"]
 
@@ -256,7 +256,7 @@ class DisplaysTab(QWidget):
         self._load()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        root = QVBoxLayout(make_centered(self))
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(10)
 

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QHBoxLayout, QLabel,
     QPushButton, QVBoxLayout, QWidget,
 )
-from common import run, separator
+from common import run, separator, make_centered
 
 
 def _load_info():
@@ -100,7 +100,7 @@ class SystemTab(QWidget):
         self._load()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        root = QVBoxLayout(make_centered(self))
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(10)
 

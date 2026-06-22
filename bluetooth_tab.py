@@ -1,12 +1,12 @@
 import re
 import subprocess
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QLabel,
     QListWidgetItem, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
-from common import run, separator, NavList
+from common import run, separator, make_centered, NavList
 
 
 def _bt_enabled():
@@ -227,7 +227,7 @@ class BluetoothTab(QWidget):
         self._load()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        root = QVBoxLayout(make_centered(self))
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(10)
 
@@ -279,14 +279,28 @@ class BluetoothTab(QWidget):
         self._scan_btn.setEnabled(enabled)
 
     def _toggle_bt(self):
-        state = "off" if _bt_enabled() else "on"
-        run(["bluetoothctl", "power", state])
-        self._refresh_toggle()
-        if state == "on":
-            self._load()
+        turning_on = not _bt_enabled()
+        self._toggle_btn.setEnabled(False)
+
+        if turning_on:
+            self._status_lbl.setText("Enabling Bluetooth…")
+            run(["rfkill", "unblock", "bluetooth"])
+            _, ok = run(["bluetoothctl", "power", "on"])
+            self._toggle_btn.setEnabled(True)
+            if not ok or not _bt_enabled():
+                self._status_lbl.setText(
+                    "Failed to enable Bluetooth — is bluetoothd running?"
+                )
+                self._refresh_toggle()
+                return
+            self._refresh_toggle()
+            QTimer.singleShot(600, self._load)
         else:
+            run(["bluetoothctl", "power", "off"])
+            self._toggle_btn.setEnabled(True)
             self._list.clear()
             self._detail.setVisible(False)
+            self._refresh_toggle()
             self._status_lbl.setText("Bluetooth powered off")
 
     def _load(self):
@@ -333,7 +347,7 @@ class BluetoothTab(QWidget):
             self._list.addItem(QListWidgetItem(" ".join(parts)))
 
     def _on_error(self, msg):
-        self._status_lbl.setText(f"Error: {msg}")
+        self._status_lbl.setText(msg if msg == "Bluetooth is powered off" else f"Error: {msg}")
 
     def _on_select(self, row):
         if 0 <= row < len(self._devices):

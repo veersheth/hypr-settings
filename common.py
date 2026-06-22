@@ -1,7 +1,7 @@
 import subprocess
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QFrame, QListWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QListWidget, QWidget
 
 
 def run(cmd, timeout=15):
@@ -17,6 +17,19 @@ def separator():
     f.setFrameShape(QFrame.HLine)
     f.setFixedHeight(1)
     return f
+
+
+def make_centered(host, max_width=1100):
+    """Wrap host's layout in a centered container with a max width."""
+    outer = QHBoxLayout(host)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(0)
+    inner = QWidget()
+    inner.setMaximumWidth(max_width)
+    outer.addStretch()
+    outer.addWidget(inner, stretch=1)
+    outer.addStretch()
+    return inner
 
 
 class NavList(QListWidget):

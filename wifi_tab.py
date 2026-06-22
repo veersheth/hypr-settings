@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
-from common import run, separator, NavList
+from common import run, separator, make_centered, NavList
 
 
 def _wifi_device():
@@ -92,9 +92,14 @@ class _ScanThread(QThread):
     done = Signal(list)
     error = Signal(str)
 
+    def __init__(self, rescan=False):
+        super().__init__()
+        self._rescan = rescan
+
     def run(self):
+        rescan = "yes" if self._rescan else "no"
         out, ok = run(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,ACTIVE",
-                         "device", "wifi", "list", "--rescan", "auto"])
+                         "device", "wifi", "list", "--rescan", rescan])
         if not ok and not out:
             self.error.emit("nmcli unavailable — is NetworkManager running?")
             return
@@ -290,7 +295,7 @@ class WifiTab(QWidget):
         self._scan()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        root = QVBoxLayout(make_centered(self))
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(10)
 
@@ -306,7 +311,7 @@ class WifiTab(QWidget):
         self._toggle_btn.clicked.connect(self._toggle_wifi)
         header.addWidget(self._toggle_btn)
         self._reload_btn = QPushButton("Reload")
-        self._reload_btn.clicked.connect(self._scan)
+        self._reload_btn.clicked.connect(lambda: self._scan(rescan=True))
         header.addWidget(self._reload_btn)
         root.addLayout(header)
 
@@ -340,7 +345,7 @@ class WifiTab(QWidget):
 
         # Right: detail panel
         self._detail = _DetailPanel()
-        self._detail.action_done.connect(self._scan)
+        self._detail.action_done.connect(lambda: self._scan(rescan=True))
         body.addWidget(self._detail, stretch=1)
 
         root.addLayout(body, stretch=1)
@@ -361,17 +366,17 @@ class WifiTab(QWidget):
             self._detail.setVisible(False)
             self._status_lbl.setText("Wi-Fi disabled")
 
-    def _scan(self):
+    def _scan(self, rescan=False):
         if self._scan_thread and self._scan_thread.isRunning():
             return
         if not _wifi_enabled():
             return
         self._reload_btn.setEnabled(False)
-        self._status_lbl.setText("Scanning…")
+        self._status_lbl.setText("Scanning…" if rescan else "Loading…")
         self._list.clear()
         self._detail.setVisible(False)
         self._networks = []
-        self._scan_thread = _ScanThread()
+        self._scan_thread = _ScanThread(rescan=rescan)
         self._scan_thread.done.connect(self._on_done)
         self._scan_thread.error.connect(self._on_error)
         self._scan_thread.start()
