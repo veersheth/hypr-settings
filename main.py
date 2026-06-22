@@ -50,6 +50,10 @@ QTabWidget::pane {{
     background-color: {BG};
 }}
 
+QTabWidget::tab-bar {{
+    alignment: center;
+}}
+
 QTabBar {{
     background: {BG};
 }}
@@ -57,9 +61,12 @@ QTabBar {{
 QTabBar::tab {{
     background: {BG};
     color: {TEXT_MUTED};
+    margin: 12px 2px;
     padding: 10px 28px;
     border: none;
+    border-radius: {RADIUS};
     min-width: 80px;
+    font-weight: bold;
 }}
 
 QTabBar::tab:selected {{
@@ -321,7 +328,7 @@ QScrollArea {{
 
 def main():
     app = QApplication(sys.argv)
-    app.setFont(QFont("Sans", 16))
+    app.setFont(QFont("sans", 16))
     app.setStyleSheet(_qss())
 
     window = QMainWindow()
@@ -329,6 +336,7 @@ def main():
     window.setMinimumSize(880, 580)
 
     tabs = QTabWidget()
+    tabs.tabBar().setExpanding(False)
 
     tabs.addTab(WifiTab(), "Wi-Fi")
     tabs.addTab(BluetoothTab(), "Bluetooth")
