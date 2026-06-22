@@ -30,17 +30,15 @@ ACTIVE_TEXT = "#000000"   # text on ACTIVE_BG
 RADIUS      = "4px"       # standard border radius
 RADIUS_LG   = "6px"       # larger radius (list widget)
 
-FONT_SIZE   = "16px"      # base font size
-FONT_SM     = "16px"      # small / status text
-FONT_MD     = "16px"      # section titles
-FONT_LG     = "18px"      # detail panel titles
-FONT_XL     = "22px"      # page titles
+_base_font  = 16          # zoom base (px), changed by Ctrl+/Ctrl+-
 
-QSS = f"""
+def _qss():
+    b = _base_font
+    return f"""
 QWidget {{
     background-color: {BG};
     color: {TEXT};
-    font-size: {FONT_SIZE};
+    font-size: {b}px;
 }}
 
 QMainWindow {{
@@ -80,13 +78,13 @@ QLabel {{
 }}
 
 QLabel#pageTitle {{
-    font-size: {FONT_XL};
+    font-size: {b+6}px;
     font-weight: 600;
     color: {TEXT_BRIGHT};
 }}
 
 QLabel#sectionTitle {{
-    font-size: {FONT_MD};
+    font-size: {b}px;
     font-weight: 600;
     color: {TEXT_DIM};
     padding-top: 2px;
@@ -94,14 +92,14 @@ QLabel#sectionTitle {{
 }}
 
 QLabel#detailTitle {{
-    font-size: {FONT_LG};
+    font-size: {b+2}px;
     font-weight: 600;
     color: {TEXT_BRIGHT};
 }}
 
 QLabel#statusLabel {{
     color: {TEXT_MUTED};
-    font-size: {FONT_SM};
+    font-size: {b}px;
 }}
 
 QLabel#fieldLabel {{
@@ -324,7 +322,7 @@ QScrollArea {{
 def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Sans", 16))
-    app.setStyleSheet(QSS)
+    app.setStyleSheet(_qss())
 
     window = QMainWindow()
     window.setWindowTitle("Settings")
@@ -342,6 +340,16 @@ def main():
         QShortcut(QKeySequence(f"Alt+{i + 1}"), window).activated.connect(
             lambda idx=i: tabs.setCurrentIndex(idx)
         )
+
+    def zoom(delta):
+        global _base_font
+        _base_font = max(10, min(32, _base_font + delta))
+        app.setStyleSheet(_qss())
+
+    QShortcut(QKeySequence("Ctrl+="), window).activated.connect(lambda: zoom(1))
+    QShortcut(QKeySequence("Ctrl++"), window).activated.connect(lambda: zoom(1))
+    QShortcut(QKeySequence("Ctrl+-"), window).activated.connect(lambda: zoom(-1))
+    QShortcut(QKeySequence("Ctrl+0"), window).activated.connect(lambda: zoom(16 - _base_font))
 
     window.setCentralWidget(tabs)
     window.show()
