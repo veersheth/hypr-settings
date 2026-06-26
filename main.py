@@ -8,6 +8,7 @@ from displays_tab import DisplaysTab
 from sound_tab import SoundTab
 from system_tab import SystemTab
 from apps_tab import AppsTab
+from appearance_tab import AppearanceTab
 
 BG          = "#0d0d0d"   # primary background
 BG_RAISED   = "#111111"   # inputs, list, slightly lifted surfaces
@@ -142,6 +143,13 @@ QPushButton:disabled {{
     background-color: {BG};
     border-color: {BORDER_SUBTLE};
 }}
+
+QPushButton:checked {{
+    background-color: {ACTIVE_BG};
+    color: {ACTIVE_TEXT};
+    border-color: {ACTIVE_BG};
+}}
+
 
 QListWidget {{
     background: {BG_RAISED};
@@ -349,6 +357,7 @@ def main():
     tabs.addTab(DisplaysTab(), "Displays")
     tabs.addTab(SoundTab(), "Sound")
     tabs.addTab(AppsTab(), "Apps")
+    tabs.addTab(AppearanceTab(), "Appearance")
     tabs.addTab(SystemTab(), "System")
 
     for i in range(tabs.count()):
