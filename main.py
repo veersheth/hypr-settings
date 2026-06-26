@@ -7,6 +7,7 @@ from bluetooth_tab import BluetoothTab
 from displays_tab import DisplaysTab
 from sound_tab import SoundTab
 from system_tab import SystemTab
+from apps_tab import AppsTab
 
 BG          = "#0d0d0d"   # primary background
 BG_RAISED   = "#111111"   # inputs, list, slightly lifted surfaces
@@ -78,6 +79,7 @@ QTabBar::tab:hover:!selected {{
     color: {TEXT_DIM};
     background: {BG_HOVER};
 }}
+
 
 QLabel {{
     background: transparent;
@@ -231,6 +233,10 @@ QComboBox QAbstractItemView {{
     padding: 3px;
 }}
 
+QComboBox QAbstractItemView::item:hover {{
+    background: {BG_HOVER};
+}}
+
 QSpinBox {{
     background: {BG_RAISED};
     border: 1px solid {BORDER};
@@ -342,6 +348,7 @@ def main():
     tabs.addTab(BluetoothTab(), "Bluetooth")
     tabs.addTab(DisplaysTab(), "Displays")
     tabs.addTab(SoundTab(), "Sound")
+    tabs.addTab(AppsTab(), "Apps")
     tabs.addTab(SystemTab(), "System")
 
     for i in range(tabs.count()):
