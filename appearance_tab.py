@@ -11,8 +11,6 @@ from common import run, separator, make_centered, ToggleSwitch
 GTK3 = os.path.expanduser("~/.config/gtk-3.0/settings.ini")
 GTK4 = os.path.expanduser("~/.config/gtk-4.0/settings.ini")
 
-CURSOR_SIZES = [16, 20, 24, 28, 32, 40, 48, 64]
-
 
 def _theme_dirs():
     dirs = [os.path.expanduser("~/.local/share/icons")]
@@ -97,10 +95,6 @@ def _scan_cursor_themes():
     return sorted([(v, k) for k, v in seen.items()], key=lambda x: x[0].lower())
 
 
-def _gsettings(key, value):
-    run(["gsettings", "set", "org.gnome.desktop.interface", key, str(value)])
-
-
 def _parse_font(s):
     parts = s.rsplit(" ", 1)
     if len(parts) == 2:
@@ -110,6 +104,9 @@ def _parse_font(s):
             pass
     return s.strip(), 11
 
+
+def _gsettings(key, value):
+    run(["gsettings", "set", "org.gnome.desktop.interface", key, str(value)])
 
 
 class _LoadThread(QThread):
@@ -149,7 +146,7 @@ class AppearanceTab(QWidget):
         root.addWidget(self._status_lbl)
         root.addWidget(separator())
 
-        def row(label, widget, extra=None):
+        def row(label, widget):
             h = QHBoxLayout()
             h.setSpacing(10)
             lbl = QLabel(label)
@@ -157,8 +154,6 @@ class AppearanceTab(QWidget):
             lbl.setObjectName("fieldLabel")
             h.addWidget(lbl)
             h.addWidget(widget, stretch=1)
-            if extra:
-                h.addWidget(extra)
             root.addLayout(h)
 
         self._toggle = ToggleSwitch()
@@ -178,17 +173,11 @@ class AppearanceTab(QWidget):
 
         self._icon_combo = QComboBox()
         self._icon_combo.currentIndexChanged.connect(self._on_icon)
-        row("Icon Theme", self._icon_combo)
+        row("GTK Icon Theme", self._icon_combo)
 
         self._cursor_combo = QComboBox()
         self._cursor_combo.currentIndexChanged.connect(self._on_cursor_theme)
-        row("Cursor Theme", self._cursor_combo)
-
-        self._size_combo = QComboBox()
-        for s in CURSOR_SIZES:
-            self._size_combo.addItem(str(s), s)
-        self._size_combo.currentIndexChanged.connect(self._on_cursor_size)
-        row("Cursor Size", self._size_combo)
+        row("GTK Cursor Theme", self._cursor_combo)
 
         root.addWidget(separator())
 
@@ -198,7 +187,13 @@ class AppearanceTab(QWidget):
         self._font_size.setRange(6, 72)
         self._font_size.setFixedWidth(70)
         self._font_size.valueChanged.connect(self._on_font_size)
-        row("Font", self._font_combo, self._font_size)
+        font_container = QWidget()
+        font_layout = QHBoxLayout(font_container)
+        font_layout.setContentsMargins(0, 0, 0, 0)
+        font_layout.setSpacing(6)
+        font_layout.addWidget(self._font_combo, stretch=1)
+        font_layout.addWidget(self._font_size)
+        row("GTK Font", font_container)
 
         root.addStretch()
 
@@ -215,11 +210,9 @@ class AppearanceTab(QWidget):
         self._reload_btn.setEnabled(True)
         self._busy = True
 
-        # Color scheme
         dark = settings.get("gtk-application-prefer-dark-theme", "").lower()
         self._toggle.set_on(dark in ("1", "true"), silent=True)
 
-        # Icon themes
         self._icon_combo.clear()
         self._icon_combo.addItem("-", "")
         for name, key in icon_themes:
@@ -227,7 +220,6 @@ class AppearanceTab(QWidget):
         idx = self._icon_combo.findData(settings.get("gtk-icon-theme-name", ""))
         self._icon_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
-        # Cursor themes
         self._cursor_combo.clear()
         self._cursor_combo.addItem("-", "")
         for name, key in cursor_themes:
@@ -235,15 +227,6 @@ class AppearanceTab(QWidget):
         idx = self._cursor_combo.findData(settings.get("gtk-cursor-theme-name", ""))
         self._cursor_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
-        # Cursor size
-        try:
-            size = int(settings.get("gtk-cursor-theme-size", "24"))
-        except ValueError:
-            size = 24
-        idx = self._size_combo.findData(size)
-        self._size_combo.setCurrentIndex(idx if idx >= 0 else self._size_combo.findData(24))
-
-        # Font
         font_name, font_size = _parse_font(settings.get("gtk-font-name", "Sans 11"))
         self._font_combo.setCurrentFont(QFont(font_name))
         self._font_size.setValue(font_size)
@@ -279,15 +262,6 @@ class AppearanceTab(QWidget):
             _update_ini(GTK3, {"gtk-cursor-theme-name": val})
             _update_ini(GTK4, {"gtk-cursor-theme-name": val})
             _gsettings("cursor-theme", val)
-
-    def _on_cursor_size(self, _):
-        if self._busy:
-            return
-        val = self._size_combo.currentData()
-        if val:
-            _update_ini(GTK3, {"gtk-cursor-theme-size": str(val)})
-            _update_ini(GTK4, {"gtk-cursor-theme-size": str(val)})
-            _gsettings("cursor-size", val)
 
     def _on_font(self, _):
         if not self._busy:
