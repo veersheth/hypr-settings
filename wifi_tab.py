@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
-from common import run, separator, make_centered, NavList
+from common import run, separator, make_centered, NavList, ToggleSwitch
 
 
 def _wifi_device():
@@ -306,10 +306,9 @@ class WifiTab(QWidget):
         title.setObjectName("pageTitle")
         header.addWidget(title)
         header.addStretch()
-        self._toggle_btn = QPushButton()
-        self._toggle_btn.setFixedWidth(120)
-        self._toggle_btn.clicked.connect(self._toggle_wifi)
-        header.addWidget(self._toggle_btn)
+        self._wifi_switch = ToggleSwitch()
+        self._wifi_switch.toggled.connect(self._toggle_wifi)
+        header.addWidget(self._wifi_switch)
         self._reload_btn = QPushButton("Reload")
         self._reload_btn.clicked.connect(lambda: self._scan(rescan=True))
         header.addWidget(self._reload_btn)
@@ -352,19 +351,20 @@ class WifiTab(QWidget):
 
     def _refresh_toggle(self):
         enabled = _wifi_enabled()
-        self._toggle_btn.setText("Disable Wi-Fi" if enabled else "Enable Wi-Fi")
+        self._wifi_switch.set_on(enabled, silent=True)
         self._reload_btn.setEnabled(enabled)
 
-    def _toggle_wifi(self):
-        state = "off" if _wifi_enabled() else "on"
-        run(["nmcli", "radio", "wifi", state])
-        self._refresh_toggle()
-        if state == "on":
+    def _toggle_wifi(self, turn_on):
+        run(["nmcli", "radio", "wifi", "on" if turn_on else "off"])
+        self._reload_btn.setEnabled(turn_on)
+        if turn_on:
             self._scan()
         else:
             self._list.clear()
             self._detail.setVisible(False)
             self._status_lbl.setText("Wi-Fi disabled")
+        # Sync switch to actual state in case the command failed
+        self._wifi_switch.set_on(_wifi_enabled(), silent=True)
 
     def _scan(self, rescan=False):
         if self._scan_thread and self._scan_thread.isRunning():

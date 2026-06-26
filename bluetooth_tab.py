@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
-from common import run, separator, make_centered, NavList
+from common import run, separator, make_centered, NavList, ToggleSwitch
 
 
 def _bt_enabled():
@@ -237,10 +237,9 @@ class BluetoothTab(QWidget):
         title.setObjectName("pageTitle")
         header.addWidget(title)
         header.addStretch()
-        self._toggle_btn = QPushButton()
-        self._toggle_btn.setFixedWidth(150)
-        self._toggle_btn.clicked.connect(self._toggle_bt)
-        header.addWidget(self._toggle_btn)
+        self._bt_switch = ToggleSwitch()
+        self._bt_switch.toggled.connect(self._toggle_bt)
+        header.addWidget(self._bt_switch)
         self._scan_btn = QPushButton("Scan")
         self._scan_btn.clicked.connect(self._scan)
         header.addWidget(self._scan_btn)
@@ -275,18 +274,17 @@ class BluetoothTab(QWidget):
 
     def _refresh_toggle(self):
         enabled = _bt_enabled()
-        self._toggle_btn.setText("Disable Bluetooth" if enabled else "Enable Bluetooth")
+        self._bt_switch.set_on(enabled, silent=True)
         self._scan_btn.setEnabled(enabled)
 
-    def _toggle_bt(self):
-        turning_on = not _bt_enabled()
-        self._toggle_btn.setEnabled(False)
+    def _toggle_bt(self, turn_on):
+        self._bt_switch.setEnabled(False)
 
-        if turning_on:
+        if turn_on:
             self._status_lbl.setText("Enabling Bluetooth…")
             run(["rfkill", "unblock", "bluetooth"])
             _, ok = run(["bluetoothctl", "power", "on"])
-            self._toggle_btn.setEnabled(True)
+            self._bt_switch.setEnabled(True)
             if not ok or not _bt_enabled():
                 self._status_lbl.setText(
                     "Failed to enable Bluetooth — is bluetoothd running?"
@@ -297,7 +295,7 @@ class BluetoothTab(QWidget):
             QTimer.singleShot(600, self._load)
         else:
             run(["bluetoothctl", "power", "off"])
-            self._toggle_btn.setEnabled(True)
+            self._bt_switch.setEnabled(True)
             self._list.clear()
             self._detail.setVisible(False)
             self._refresh_toggle()

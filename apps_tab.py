@@ -1,13 +1,21 @@
 import glob
 import os
+import re
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
+    QComboBox, QFrame, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
-from common import run, separator, make_centered
+from common import run, separator, make_centered, ToggleSwitch
 
 AUTOSTART_DIR = os.path.expanduser("~/.config/autostart")
+ENV_FILE      = os.path.expanduser("~/.config/environment.d/hypr-settings.conf")
+
+ENV_VARS = [
+    ("Browser",  "BROWSER",  "x-scheme-handler/http"),
+    ("Editor",   "EDITOR",   "text/plain"),
+    ("Terminal", "TERMINAL", None),  # detected via TerminalEmulator category
+]
 
 CATEGORIES = [
     ("Web Browser",     "x-scheme-handler/http",  ["x-scheme-handler/http", "x-scheme-handler/https", "text/html"]),
@@ -35,8 +43,8 @@ def _xdg_app_dirs():
 
 def _parse_desktop(path):
     result = {
-        "name": None, "mimes": set(),
-        "comment": "", "no_display": False, "enabled": True,
+        "name": None, "mimes": set(), "exec": "",
+        "categories": set(), "comment": "", "no_display": False, "enabled": True,
     }
     try:
         in_entry = False
@@ -53,6 +61,10 @@ def _parse_desktop(path):
                     result["name"] = line[5:]
                 elif line.startswith("MimeType="):
                     result["mimes"] = {m for m in line[9:].split(";") if m}
+                elif line.startswith("Exec=") and not result["exec"]:
+                    result["exec"] = line[5:]
+                elif line.startswith("Categories="):
+                    result["categories"] = {c for c in line[11:].split(";") if c}
                 elif line.startswith("Comment="):
                     result["comment"] = line[8:]
                 elif line.startswith("NoDisplay="):
@@ -62,6 +74,46 @@ def _parse_desktop(path):
     except OSError:
         return None
     return result if result["name"] else None
+
+
+def _exec_cmd(exec_str):
+    cmd = re.sub(r'%\w', '', exec_str or "").strip()
+    parts = cmd.split()
+    return os.path.basename(parts[0]) if parts else ""
+
+
+def _read_env_file():
+    vals = {}
+    try:
+        with open(ENV_FILE, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, _, v = line.partition("=")
+                    vals[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return vals
+
+
+def _write_env_var(key, value):
+    os.makedirs(os.path.dirname(ENV_FILE), exist_ok=True)
+    try:
+        try:
+            with open(ENV_FILE, encoding="utf-8") as f:
+                lines = f.readlines()
+        except OSError:
+            lines = []
+        prefix = f"{key}="
+        new_line = f"{key}={value}\n"
+        if any(l.startswith(prefix) for l in lines):
+            lines = [new_line if l.startswith(prefix) else l for l in lines]
+        else:
+            lines.append(new_line)
+        with open(ENV_FILE, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    except OSError:
+        pass
 
 
 def _apply_default(desktop_id, mime_types):
@@ -99,7 +151,7 @@ def _delete_autostart(path):
 
 
 class _LoadThread(QThread):
-    done = Signal(dict, dict, list)
+    done = Signal(dict, dict, list, list, dict)
     error = Signal(str)
 
     def run(self):
@@ -119,12 +171,18 @@ class _LoadThread(QThread):
         defaults = {}
         for _, query_mime, _ in CATEGORIES:
             apps_by_mime[query_mime] = sorted(
-                [(info["name"], did) for did, info in all_apps.items()
+                [(info["name"], did, _exec_cmd(info["exec"])) for did, info in all_apps.items()
                  if query_mime in info["mimes"]],
                 key=lambda x: x[0].lower(),
             )
             out, _ = run(["xdg-mime", "query", "default", query_mime])
             defaults[query_mime] = out.strip()
+
+        terminals = sorted(
+            [(info["name"], _exec_cmd(info["exec"])) for info in all_apps.values()
+             if "TerminalEmulator" in info["categories"] and info["exec"]],
+            key=lambda x: x[0].lower(),
+        )
 
         os.makedirs(AUTOSTART_DIR, exist_ok=True)
         autostart = []
@@ -138,7 +196,7 @@ class _LoadThread(QThread):
                     "enabled": info["enabled"],
                 })
 
-        self.done.emit(apps_by_mime, defaults, autostart)
+        self.done.emit(apps_by_mime, defaults, autostart, terminals, _read_env_file())
 
 
 def _section_label(text):
@@ -199,7 +257,7 @@ class AppsTab(QWidget):
         self._reload_btn.setEnabled(True)
         self._status_lbl.setText(f"Error: {msg}")
 
-    def _on_done(self, apps_by_mime, defaults, autostart):
+    def _on_done(self, apps_by_mime, defaults, autostart, terminals, env):
         self._reload_btn.setEnabled(True)
 
         layout = self._content_layout
@@ -225,7 +283,7 @@ class AppsTab(QWidget):
 
             combo = QComboBox()
             combo.addItem("-", "")
-            for app_name, did in matching:
+            for app_name, did, _ in matching:
                 combo.addItem(app_name, did)
 
             combo.blockSignals(True)
@@ -241,6 +299,52 @@ class AppsTab(QWidget):
             w = QWidget()
             w.setLayout(row)
             layout.addWidget(w)
+
+        # Environment Defaults
+        layout.addSpacing(8)
+        layout.addWidget(_section_label("Environment Defaults"))
+        layout.addWidget(separator())
+
+        # For env combos: extract (name, cmd) from the 3-tuples in apps_by_mime
+        env_sources = {
+            "x-scheme-handler/http": [(n, c) for n, _, c in apps_by_mime.get("x-scheme-handler/http", [])],
+            "text/plain":            [(n, c) for n, _, c in apps_by_mime.get("text/plain", [])],
+        }
+
+        for label, var, mime in ENV_VARS:
+            options = env_sources.get(mime, []) if mime else terminals
+
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            lbl = QLabel(label)
+            lbl.setFixedWidth(140)
+            lbl.setObjectName("fieldLabel")
+            row.addWidget(lbl)
+
+            combo = QComboBox()
+            combo.addItem("-", "")
+            for app_name, cmd in options:
+                if cmd:
+                    combo.addItem(f"{app_name}  ({cmd})", cmd)
+
+            combo.blockSignals(True)
+            current_cmd = env.get(var, "")
+            idx = combo.findData(current_cmd)
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+            combo.blockSignals(False)
+
+            combo.currentIndexChanged.connect(
+                lambda _, c=combo, v=var: _write_env_var(v, c.currentData()) if c.currentData() else None
+            )
+            row.addWidget(combo, stretch=1)
+
+            w = QWidget()
+            w.setLayout(row)
+            layout.addWidget(w)
+
+        note = QLabel("Environment variable changes take effect on next login.")
+        note.setObjectName("statusLabel")
+        layout.addWidget(note)
 
         # Autostart
         layout.addSpacing(8)
@@ -268,12 +372,12 @@ class AppsTab(QWidget):
         row.setContentsMargins(0, 2, 0, 2)
         row.setSpacing(10)
 
-        cb = QCheckBox()
-        cb.setChecked(entry["enabled"])
-        cb.stateChanged.connect(
-            lambda state, p=entry["path"]: _write_autostart_enabled(p, bool(state))
+        toggle = ToggleSwitch()
+        toggle.set_on(entry["enabled"], silent=True)
+        toggle.toggled.connect(
+            lambda on, p=entry["path"]: _write_autostart_enabled(p, on)
         )
-        row.addWidget(cb)
+        row.addWidget(toggle)
 
         name_lbl = QLabel(entry["name"])
         if entry["comment"]:
