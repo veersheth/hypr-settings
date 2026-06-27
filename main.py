@@ -1,6 +1,22 @@
+import fcntl
+import os
 import sys
+import tempfile
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget
+
+_LOCK_FILE = os.path.join(tempfile.gettempdir(), f"hypr-settings-{os.getenv('USER', 'user')}.lock")
+_lock_fh = None
+
+
+def _acquire_lock():
+    global _lock_fh
+    _lock_fh = open(_LOCK_FILE, "w")
+    try:
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
 
 from wifi_tab import WifiTab
 from bluetooth_tab import BluetoothTab
@@ -341,6 +357,9 @@ QScrollArea {{
 
 
 def main():
+    if not _acquire_lock():
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     app.setFont(QFont("sans", 16))
     app.setStyleSheet(_qss())
