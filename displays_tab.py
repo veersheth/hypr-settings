@@ -1,13 +1,33 @@
 import json
+import os
 from PySide6.QtCore import Qt, QRect, QPoint, Signal
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout,
+    QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
     QLabel, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 from common import run, separator, make_centered
 
+MONITORS_LUA = os.path.expanduser("~/.config/hypr/monitors.lua")
+HYPRLAND_LUA = os.path.expanduser("~/.config/hypr/hyprland.lua")
+DOFILE_LINE = 'dofile(os.getenv("HOME").."/.config/hypr/monitors.lua")'
 COLORS = ["#2a5298", "#7b2d8b", "#1e7a4a", "#8b4513", "#1a6b8a", "#6b1a3a"]
+
+TRANSFORMS = [
+    ("Normal", 0), ("90°", 1), ("180°", 2), ("270°", 3),
+    ("Flipped", 4), ("Flipped + 90°", 5), ("Flipped + 180°", 6), ("Flipped + 270°", 7),
+]
+
+
+def _parse_mode(s):
+    s = s.replace("Hz", "")
+    res, _, rr = s.partition("@")
+    w, _, h = res.partition("x")
+    return int(w), int(h), float(rr or "0")
+
+
+def _format_mode(w, h, rr):
+    return f"{w}×{h} @ {rr:.0f} Hz"
 
 
 def _load_monitors():
@@ -18,8 +38,6 @@ def _load_monitors():
         monitors = json.loads(out)
     except json.JSONDecodeError:
         return None, "Failed to parse hyprctl output"
-
-    # Normalize mirrorOf ("none" string → None, name → name)
     for m in monitors:
         raw = m.get("mirrorOf", "none")
         m["mirror"] = None if raw == "none" else raw
@@ -39,9 +57,33 @@ def _apply_monitor(m):
     return run(["hyprctl", "keyword", "monitor", value])
 
 
+def _write_monitors_lua(monitors):
+    lines = []
+    for m in monitors:
+        scale = m.get("scale", 1.0)
+        parts = [
+            f'output = "{m["name"]}"',
+            f'mode = "{m["width"]}x{m["height"]}@{m["refreshRate"]:.0f}"',
+            f'position = "{m["x"]}x{m["y"]}"',
+            f'scale = {scale:.2g}',
+        ]
+        if m.get("transform", 0):
+            parts.append(f'transform = {m["transform"]}')
+        if m.get("mirror"):
+            parts.append(f'mirror = "{m["mirror"]}"')
+        if m.get("disabled"):
+            parts.append("disabled = true")
+        lines.append("hl.monitor({ " + ", ".join(parts) + " })")
+    os.makedirs(os.path.dirname(MONITORS_LUA), exist_ok=True)
+    with open(MONITORS_LUA, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def _logical_size(m):
     s = m.get("scale", 1.0) or 1.0
-    return int(m["width"] / s), int(m["height"] / s)
+    t = m.get("transform", 0)
+    w, h = int(m["width"] / s), int(m["height"] / s)
+    return (h, w) if t in (1, 3, 5, 7) else (w, h)
 
 
 # canvas
@@ -147,7 +189,7 @@ class _MonitorCanvas(QWidget):
         self.update()
 
 
-# settings 
+# settings panel
 
 class _SettingsPanel(QWidget):
     def __init__(self):
@@ -179,6 +221,25 @@ class _SettingsPanel(QWidget):
             h.addWidget(widget, stretch=1)
             root.addLayout(h)
 
+        self._mode_combo = QComboBox()
+        self._mode_combo.currentIndexChanged.connect(self._on_mode)
+        row("Resolution", self._mode_combo)
+
+        self._scale_spin = QDoubleSpinBox()
+        self._scale_spin.setRange(0.25, 4.0)
+        self._scale_spin.setSingleStep(0.25)
+        self._scale_spin.setDecimals(2)
+        self._scale_spin.valueChanged.connect(self._on_scale)
+        row("Scale", self._scale_spin)
+
+        self._transform_combo = QComboBox()
+        for label, val in TRANSFORMS:
+            self._transform_combo.addItem(label, val)
+        self._transform_combo.currentIndexChanged.connect(self._on_transform)
+        row("Rotation", self._transform_combo)
+
+        root.addWidget(separator())
+
         self._pos_x = QSpinBox()
         self._pos_x.setRange(-99999, 99999)
         self._pos_x.valueChanged.connect(self._on_pos)
@@ -207,6 +268,26 @@ class _SettingsPanel(QWidget):
         self._desc_lbl.setText(desc)
         self._desc_lbl.setVisible(bool(desc))
 
+        self._mode_combo.clear()
+        modes = m.get("availableModes", [])
+        sel_idx = 0
+        for i, mode_str in enumerate(modes):
+            w, h, rr = _parse_mode(mode_str)
+            self._mode_combo.addItem(_format_mode(w, h, rr), (w, h, rr))
+            if w == m["width"] and h == m["height"] and abs(rr - m["refreshRate"]) < 0.5:
+                sel_idx = i
+        if not modes:
+            self._mode_combo.addItem(
+                _format_mode(m["width"], m["height"], m["refreshRate"]),
+                (m["width"], m["height"], m["refreshRate"]),
+            )
+        self._mode_combo.setCurrentIndex(sel_idx)
+
+        self._scale_spin.setValue(m.get("scale", 1.0))
+
+        idx = self._transform_combo.findData(m.get("transform", 0))
+        self._transform_combo.setCurrentIndex(idx if idx >= 0 else 0)
+
         self._pos_x.setValue(m.get("x", 0))
         self._pos_y.setValue(m.get("y", 0))
 
@@ -218,13 +299,12 @@ class _SettingsPanel(QWidget):
         current_mirror = m.get("mirror")
         idx = self._mirror_cb.findData(current_mirror)
         self._mirror_cb.setCurrentIndex(idx if idx >= 0 else 0)
-
         self._set_position_enabled(not bool(current_mirror))
+
         self._busy = False
         self.setVisible(True)
 
     def update_position(self, x, y):
-        """Keep spinboxes in sync while the user drags on the canvas."""
         self._busy = True
         self._pos_x.setValue(x)
         self._pos_y.setValue(y)
@@ -233,6 +313,21 @@ class _SettingsPanel(QWidget):
     def _set_position_enabled(self, enabled):
         self._pos_x.setEnabled(enabled)
         self._pos_y.setEnabled(enabled)
+
+    def _on_mode(self, _):
+        if self._busy or not self._monitor:
+            return
+        data = self._mode_combo.currentData()
+        if data:
+            self._monitor["width"], self._monitor["height"], self._monitor["refreshRate"] = data
+
+    def _on_scale(self, val):
+        if not self._busy and self._monitor:
+            self._monitor["scale"] = val
+
+    def _on_transform(self, _):
+        if not self._busy and self._monitor:
+            self._monitor["transform"] = self._transform_combo.currentData()
 
     def _on_pos(self):
         if not self._busy and self._monitor:
@@ -299,6 +394,20 @@ class DisplaysTab(QWidget):
 
         root.addLayout(body, stretch=1)
 
+        hint_row = QHBoxLayout()
+        hint_row.setSpacing(8)
+        self._hint_lbl = QLabel(f"Saved to {MONITORS_LUA}. Add the dofile line to hyprland.lua to load on boot.")
+        self._hint_lbl.setObjectName("statusLabel")
+        self._hint_lbl.setWordWrap(True)
+        hint_row.addWidget(self._hint_lbl, stretch=1)
+        self._add_cfg_btn = QPushButton("Add to hyprland.lua")
+        self._add_cfg_btn.clicked.connect(self._add_to_config)
+        hint_row.addWidget(self._add_cfg_btn)
+        self._hint_widget = QWidget()
+        self._hint_widget.setLayout(hint_row)
+        self._hint_widget.setVisible(False)
+        root.addWidget(self._hint_widget)
+
     def _load(self):
         monitors, err = _load_monitors()
         if err:
@@ -307,7 +416,7 @@ class DisplaysTab(QWidget):
         self._canvas.set_monitors(monitors)
         self._settings.setVisible(False)
         n = len(monitors)
-        self._status_lbl.setText(f"{n} display(s) detected — drag to arrange, click to configure")
+        self._status_lbl.setText(f"{n} display(s) - drag to arrange, click to configure")
 
     def _on_select(self, monitor):
         if monitor:
@@ -317,6 +426,24 @@ class DisplaysTab(QWidget):
 
     def _on_monitor_moved(self, x, y):
         self._settings.update_position(x, y)
+
+    def _add_to_config(self):
+        try:
+            try:
+                with open(HYPRLAND_LUA, encoding="utf-8") as f:
+                    content = f.read()
+            except OSError:
+                content = ""
+            if "monitors.lua" in content:
+                self._hint_lbl.setText("Already present in hyprland.lua.")
+                self._add_cfg_btn.setEnabled(False)
+                return
+            with open(HYPRLAND_LUA, "a", encoding="utf-8") as f:
+                f.write(f"\n{DOFILE_LINE}\n")
+            self._hint_lbl.setText("Added to hyprland.lua.")
+            self._add_cfg_btn.setEnabled(False)
+        except OSError as e:
+            self._hint_lbl.setText(f"Failed to write hyprland.lua: {e}")
 
     def _apply(self):
         monitors = self._canvas._monitors
@@ -329,6 +456,11 @@ class DisplaysTab(QWidget):
                 failed.append(m["name"])
         if failed:
             self._status_lbl.setText(f"Failed to apply: {', '.join(failed)}")
-        else:
-            self._status_lbl.setText("Settings applied")
+            return
+        try:
+            _write_monitors_lua(monitors)
+            self._status_lbl.setText("Applied and saved")
+            self._hint_widget.setVisible(True)
+        except OSError as e:
+            self._status_lbl.setText(f"Applied (save failed: {e})")
         self._load()
