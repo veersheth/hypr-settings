@@ -1,5 +1,7 @@
+import configparser
 import fcntl
 import os
+import subprocess
 import sys
 import tempfile
 from PySide6.QtCore import QSize
@@ -18,7 +20,9 @@ from appearance_tab import AppearanceTab
 from system_tab import SystemTab
 
 _LOCK_FILE = os.path.join(tempfile.gettempdir(), f"hypr-settings-{os.getenv('USER', 'user')}.lock")
-_lock_fh = None
+_lock_fh   = None
+_is_dark   = True
+_base_font = 16
 
 
 def _acquire_lock():
@@ -31,35 +35,72 @@ def _acquire_lock():
         return False
 
 
-BG           = "#0d0d0d"
-BG_SIDEBAR   = "#080808"
-BG_RAISED    = "#111111"
-BG_HOVER     = "#1a1a1a"
-BG_PRESS     = "#080808"
-
-TEXT         = "#d8d8d8"
-TEXT_BRIGHT  = "#f0f0f0"
-TEXT_DIM     = "#b0b0b0"
-TEXT_MUTED   = "#606060"
-
-BORDER       = "#303030"
-BORDER_HOVER = "#787878"
-BORDER_FOCUS = "#aaaaaa"
-BORDER_SUBTLE = "#282828"
-
-SEP          = "#1e1e1e"
-
-ACTIVE_BG    = "#ffffff"
-ACTIVE_TEXT  = "#000000"
-
-RADIUS       = "4px"
-RADIUS_LG    = "6px"
-
-_base_font   = 16
+def _detect_dark():
+    try:
+        r = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+            capture_output=True, text=True, timeout=2,
+        )
+        val = r.stdout.strip().strip("'\"")
+        if val == "prefer-light":
+            return False
+        if val == "prefer-dark":
+            return True
+    except Exception:
+        pass
+    try:
+        cp = configparser.RawConfigParser()
+        cp.read(os.path.expanduser("~/.config/gtk-3.0/settings.ini"))
+        val = cp.get("Settings", "gtk-application-prefer-dark-theme", fallback="1")
+        return val.lower() not in ("0", "false")
+    except Exception:
+        pass
+    return True
 
 
 def _qss():
     b = _base_font
+
+    if _is_dark:
+        BG            = "#0d0d0d"
+        BG_SIDEBAR    = "#080808"
+        BG_RAISED     = "#111111"
+        BG_HOVER      = "#1a1a1a"
+        BG_PRESS      = "#050505"
+        TEXT          = "#d8d8d8"
+        TEXT_BRIGHT   = "#f0f0f0"
+        TEXT_DIM      = "#b0b0b0"
+        TEXT_MUTED    = "#606060"
+        BORDER        = "#303030"
+        BORDER_HOVER  = "#787878"
+        BORDER_FOCUS  = "#5a9cf8"
+        BORDER_SUBTLE = "#282828"
+        SEP           = "#1e1e1e"
+        INPUT_TEXT    = "#d0d0d0"
+        LIST_ITEM     = "#c8c8c8"
+    else:
+        BG            = "#f5f5f5"
+        BG_SIDEBAR    = "#eaeaea"
+        BG_RAISED     = "#ffffff"
+        BG_HOVER      = "#e4e4e4"
+        BG_PRESS      = "#d4d4d4"
+        TEXT          = "#1c1c1c"
+        TEXT_BRIGHT   = "#0a0a0a"
+        TEXT_DIM      = "#555555"
+        TEXT_MUTED    = "#888888"
+        BORDER        = "#c8c8c8"
+        BORDER_HOVER  = "#999999"
+        BORDER_FOCUS  = "#3b82f6"
+        BORDER_SUBTLE = "#e0e0e0"
+        SEP           = "#dedede"
+        INPUT_TEXT    = "#1c1c1c"
+        LIST_ITEM     = "#2a2a2a"
+
+    ACCENT      = "#3b82f6"
+    ACCENT_TEXT = "#ffffff"
+    RADIUS      = "4px"
+    RADIUS_LG   = "6px"
+
     return f"""
 QWidget {{
     background-color: {BG};
@@ -104,15 +145,14 @@ QPushButton#navBtn:hover {{
 }}
 
 QPushButton#navBtn:checked {{
-    background: {ACTIVE_BG};
-    color: {ACTIVE_TEXT};
+    background: {ACCENT};
+    color: {ACCENT_TEXT};
     font-weight: 600;
+    border-radius: 6px;
 }}
 
-QFrame#sidebarLine {{
+QSplitter::handle {{
     background: {SEP};
-    border: none;
-    max-width: 1px;
 }}
 
 /* ── Content labels ── */
@@ -155,7 +195,7 @@ QLabel#fieldLabel {{
 
 QPushButton {{
     background-color: {BG};
-    color: #cccccc;
+    color: {TEXT};
     border: 1px solid {BORDER};
     border-radius: {RADIUS};
     padding: 5px 12px;
@@ -172,19 +212,19 @@ QPushButton:hover {{
 QPushButton:pressed {{
     background-color: {BG_PRESS};
     border-color: {BORDER};
-    color: #aaaaaa;
+    color: {TEXT_DIM};
 }}
 
 QPushButton:disabled {{
-    color: #383838;
+    color: {TEXT_MUTED};
     background-color: {BG};
     border-color: {BORDER_SUBTLE};
 }}
 
 QPushButton:checked {{
-    background-color: {ACTIVE_BG};
-    color: {ACTIVE_TEXT};
-    border-color: {ACTIVE_BG};
+    background-color: {ACCENT};
+    color: {ACCENT_TEXT};
+    border-color: {ACCENT};
 }}
 
 /* ── Lists ── */
@@ -200,12 +240,12 @@ QListWidget {{
 QListWidget::item {{
     padding: 12px 14px;
     border-radius: 5px;
-    color: #c8c8c8;
+    color: {LIST_ITEM};
 }}
 
 QListWidget::item:selected {{
-    background: {ACTIVE_BG};
-    color: {ACTIVE_TEXT};
+    background: {ACCENT};
+    color: {ACCENT_TEXT};
 }}
 
 QListWidget::item:hover:!selected {{
@@ -231,7 +271,7 @@ QFrame[frameShape="5"] {{
 
 QCheckBox {{
     spacing: 8px;
-    color: #cccccc;
+    color: {TEXT};
 }}
 
 QCheckBox::indicator {{
@@ -243,8 +283,8 @@ QCheckBox::indicator {{
 }}
 
 QCheckBox::indicator:checked {{
-    background-color: {ACTIVE_BG};
-    border-color: {ACTIVE_BG};
+    background-color: {ACCENT};
+    border-color: {ACCENT};
 }}
 
 QCheckBox::indicator:hover {{
@@ -259,7 +299,7 @@ QComboBox {{
     border-radius: {RADIUS};
     padding: 4px 10px;
     min-height: 26px;
-    color: #d0d0d0;
+    color: {INPUT_TEXT};
 }}
 
 QComboBox:hover {{ border-color: {BORDER_HOVER}; }}
@@ -274,8 +314,8 @@ QComboBox QAbstractItemView {{
     background: {BG_RAISED};
     border: 1px solid {BORDER};
     border-radius: {RADIUS};
-    selection-background-color: {ACTIVE_BG};
-    selection-color: {ACTIVE_TEXT};
+    selection-background-color: {ACCENT};
+    selection-color: {ACCENT_TEXT};
     outline: none;
     padding: 3px;
 }}
@@ -290,7 +330,7 @@ QSpinBox, QDoubleSpinBox {{
     border-radius: {RADIUS};
     padding: 4px 8px;
     min-height: 26px;
-    color: #d0d0d0;
+    color: {INPUT_TEXT};
 }}
 
 QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {BORDER_FOCUS}; }}
@@ -304,7 +344,7 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 
 QSpinBox::up-button:hover, QSpinBox::down-button:hover,
 QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
-    background: #252525;
+    background: {BG_PRESS};
 }}
 
 QLineEdit {{
@@ -322,12 +362,12 @@ QLineEdit:focus {{ border-color: {BORDER_FOCUS}; }}
 
 QSlider::groove:horizontal {{
     height: 3px;
-    background: #2e2e2e;
+    background: {BORDER_SUBTLE};
     border-radius: 2px;
 }}
 
 QSlider::handle:horizontal {{
-    background: #d0d0d0;
+    background: {TEXT_DIM};
     border: none;
     width: 14px;
     height: 14px;
@@ -335,10 +375,10 @@ QSlider::handle:horizontal {{
     margin: -6px 0;
 }}
 
-QSlider::handle:horizontal:hover {{ background: {ACTIVE_BG}; }}
+QSlider::handle:horizontal:hover {{ background: {ACCENT}; }}
 
 QSlider::sub-page:horizontal {{
-    background: {BORDER_HOVER};
+    background: {ACCENT};
     border-radius: 2px;
 }}
 
@@ -351,12 +391,12 @@ QScrollBar:vertical {{
 }}
 
 QScrollBar::handle:vertical {{
-    background: #2a2a2a;
+    background: {BORDER};
     border-radius: 3px;
     min-height: 24px;
 }}
 
-QScrollBar::handle:vertical:hover {{ background: {BORDER}; }}
+QScrollBar::handle:vertical:hover {{ background: {BORDER_HOVER}; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
 
@@ -394,18 +434,28 @@ _TAB_FLAGS = [
 
 
 def main():
+    global _is_dark
+
     if not _acquire_lock():
         sys.exit(0)
+
+    _is_dark = _detect_dark()
 
     app = QApplication(sys.argv)
     app.setFont(QFont("sans", 16))
     app.setStyleSheet(_qss())
 
+    import common
+    def _apply_theme(dark: bool):
+        global _is_dark
+        _is_dark = dark
+        app.setStyleSheet(_qss())
+    common.on_theme_change = _apply_theme
+
     window = QMainWindow()
     window.setWindowTitle("Settings")
     window.setMinimumSize(960, 620)
 
-    # Root: splitter with sidebar | content
     root_widget = QWidget()
     root = QHBoxLayout(root_widget)
     root.setContentsMargins(0, 0, 0, 0)
@@ -413,7 +463,6 @@ def main():
 
     splitter = QSplitter()
     splitter.setHandleWidth(1)
-    splitter.setStyleSheet(f"QSplitter::handle {{ background: {SEP}; }}")
 
     # Sidebar
     sidebar = QWidget()
@@ -439,7 +488,6 @@ def main():
 
     for i, (label, icon_name, PageClass) in enumerate(_PAGES):
         stack.addWidget(PageClass())
-
         btn = QPushButton(f"  {label}")
         btn.setObjectName("navBtn")
         btn.setCheckable(True)

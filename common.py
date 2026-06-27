@@ -1,5 +1,7 @@
 import subprocess
 from PySide6.QtCore import QEasingCurve, QEvent, Property, QPropertyAnimation, Qt, Signal
+
+on_theme_change = None  # set by main.py to (dark: bool) -> None
 from PySide6.QtGui import QColor, QKeyEvent, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QListWidget, QWidget
 
@@ -78,12 +80,17 @@ class ToggleSwitch(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self._W, self._H
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#2e2e2e"))
+        # Interpolate track: #2e2e2e (off) -> #3b82f6 (on)
+        t = self._pos
+        tr = int(46  + t * (59  - 46))
+        tg = int(46  + t * (130 - 46))
+        tb = int(46  + t * (246 - 46))
+        p.setBrush(QColor(tr, tg, tb))
         p.drawRoundedRect(0, 0, w, h, h / 2, h / 2)
         m = 3
         d = h - 2 * m
         hx = int(m + self._pos * (w - 2 * m - d))
-        p.setBrush(QColor("#d8d8d8"))
+        p.setBrush(QColor("#ffffff"))
         p.drawEllipse(hx, m, d, d)
         p.end()
 

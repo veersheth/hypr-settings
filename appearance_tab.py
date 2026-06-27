@@ -239,6 +239,9 @@ class AppearanceTab(QWidget):
     def _on_color(self, is_dark):
         if self._busy:
             return
+        from common import on_theme_change
+        if on_theme_change:
+            on_theme_change(is_dark)
         dark_val = "true" if is_dark else "false"
         scheme = "prefer-dark" if is_dark else "prefer-light"
         _update_ini(GTK3, {"gtk-application-prefer-dark-theme": dark_val})
