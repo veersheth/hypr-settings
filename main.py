@@ -2,8 +2,20 @@ import fcntl
 import os
 import sys
 import tempfile
-from PySide6.QtGui import QFont, QKeySequence, QShortcut
-from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QFont, QIcon, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QApplication, QButtonGroup, QFrame, QHBoxLayout,
+    QLabel, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+)
+
+from wifi_tab import WifiTab
+from bluetooth_tab import BluetoothTab
+from displays_tab import DisplaysTab
+from sound_tab import SoundTab
+from apps_tab import AppsTab
+from appearance_tab import AppearanceTab
+from system_tab import SystemTab
 
 _LOCK_FILE = os.path.join(tempfile.gettempdir(), f"hypr-settings-{os.getenv('USER', 'user')}.lock")
 _lock_fh = None
@@ -18,37 +30,33 @@ def _acquire_lock():
     except OSError:
         return False
 
-from wifi_tab import WifiTab
-from bluetooth_tab import BluetoothTab
-from displays_tab import DisplaysTab
-from sound_tab import SoundTab
-from system_tab import SystemTab
-from apps_tab import AppsTab
-from appearance_tab import AppearanceTab
 
-BG          = "#0d0d0d"   # primary background
-BG_RAISED   = "#111111"   # inputs, list, slightly lifted surfaces
-BG_HOVER    = "#1a1a1a"   # hover state background
-BG_PRESS    = "#080808"   # pressed state background
+BG           = "#0d0d0d"
+BG_SIDEBAR   = "#080808"
+BG_RAISED    = "#111111"
+BG_HOVER     = "#1a1a1a"
+BG_PRESS     = "#080808"
 
-TEXT        = "#d8d8d8"   # default text
-TEXT_BRIGHT = "#f0f0f0"   # headings, active labels
-TEXT_DIM    = "#b0b0b0"   # section titles, secondary info
-TEXT_MUTED  = "#707070"   # status labels, placeholders
-BORDER      = "#545454"   # default border (buttons, inputs)
-BORDER_HOVER = "#787878"  # border on hover
-BORDER_FOCUS = "#aaaaaa"  # border on focus
-BORDER_SUBTLE = "#282828" # list widget border, disabled
+TEXT         = "#d8d8d8"
+TEXT_BRIGHT  = "#f0f0f0"
+TEXT_DIM     = "#b0b0b0"
+TEXT_MUTED   = "#606060"
 
-SEP         = "#232323"   # separator lines
+BORDER       = "#303030"
+BORDER_HOVER = "#787878"
+BORDER_FOCUS = "#aaaaaa"
+BORDER_SUBTLE = "#282828"
 
-ACTIVE_BG   = "#ffffff"   # selected tab / list item background
-ACTIVE_TEXT = "#000000"   # text on ACTIVE_BG
+SEP          = "#1e1e1e"
 
-RADIUS      = "4px"       # standard border radius
-RADIUS_LG   = "6px"       # larger radius (list widget)
+ACTIVE_BG    = "#ffffff"
+ACTIVE_TEXT  = "#000000"
 
-_base_font  = 16          # zoom base (px), changed by Ctrl+/Ctrl+-
+RADIUS       = "4px"
+RADIUS_LG    = "6px"
+
+_base_font   = 16
+
 
 def _qss():
     b = _base_font
@@ -60,43 +68,54 @@ QWidget {{
 }}
 
 QMainWindow {{
-    background-color: {BG};
+    background-color: {BG_SIDEBAR};
 }}
 
-QTabWidget::pane {{
+/* ── Sidebar ── */
+
+QWidget#sidebar {{
+    background-color: {BG_SIDEBAR};
+}}
+
+QLabel#appTitle {{
+    color: {TEXT_BRIGHT};
+    font-size: {b+2}px;
+    font-weight: 700;
+    padding: 0 4px;
+    background: transparent;
+}}
+
+QPushButton#navBtn {{
+    background: transparent;
     border: none;
-    background-color: {BG};
-}}
-
-QTabWidget::tab-bar {{
-    alignment: center;
-}}
-
-QTabBar {{
-    background: {BG};
-}}
-
-QTabBar::tab {{
-    background: {BG};
+    border-radius: 6px;
     color: {TEXT_MUTED};
-    margin: 12px 2px;
-    padding: 10px 28px;
-    border: none;
-    border-radius: {RADIUS};
-    min-width: 80px;
-    font-weight: bold;
+    font-size: {b-1}px;
+    font-weight: 500;
+    text-align: left;
+    padding: 9px 14px;
+    min-height: 22px;
+    min-width: 0;
 }}
 
-QTabBar::tab:selected {{
+QPushButton#navBtn:hover {{
+    background: {BG_HOVER};
+    color: {TEXT_DIM};
+}}
+
+QPushButton#navBtn:checked {{
     background: {ACTIVE_BG};
     color: {ACTIVE_TEXT};
+    font-weight: 600;
 }}
 
-QTabBar::tab:hover:!selected {{
-    color: {TEXT_DIM};
-    background: {BG_HOVER};
+QFrame#sidebarLine {{
+    background: {SEP};
+    border: none;
+    max-width: 1px;
 }}
 
+/* ── Content labels ── */
 
 QLabel {{
     background: transparent;
@@ -132,12 +151,14 @@ QLabel#fieldLabel {{
     color: {TEXT_DIM};
 }}
 
+/* ── Buttons ── */
+
 QPushButton {{
     background-color: {BG};
     color: #cccccc;
     border: 1px solid {BORDER};
     border-radius: {RADIUS};
-    padding: 5px 5px;
+    padding: 5px 12px;
     min-height: 26px;
     min-width: 60px;
 }}
@@ -166,6 +187,7 @@ QPushButton:checked {{
     border-color: {ACTIVE_BG};
 }}
 
+/* ── Lists ── */
 
 QListWidget {{
     background: {BG_RAISED};
@@ -190,6 +212,8 @@ QListWidget::item:hover:!selected {{
     background: {BG_HOVER};
 }}
 
+/* ── Separators ── */
+
 QFrame[frameShape="4"] {{
     border: none;
     background-color: {SEP};
@@ -202,6 +226,8 @@ QFrame[frameShape="5"] {{
     background-color: {SEP};
     max-width: 1px;
 }}
+
+/* ── Checkboxes ── */
 
 QCheckBox {{
     spacing: 8px;
@@ -225,6 +251,8 @@ QCheckBox::indicator:hover {{
     border-color: {BORDER_FOCUS};
 }}
 
+/* ── Inputs ── */
+
 QComboBox {{
     background: {BG_RAISED};
     border: 1px solid {BORDER};
@@ -234,13 +262,8 @@ QComboBox {{
     color: #d0d0d0;
 }}
 
-QComboBox:hover {{
-    border-color: {BORDER_HOVER};
-}}
-
-QComboBox:focus {{
-    border-color: {BORDER_FOCUS};
-}}
+QComboBox:hover {{ border-color: {BORDER_HOVER}; }}
+QComboBox:focus {{ border-color: {BORDER_FOCUS}; }}
 
 QComboBox::drop-down {{
     border: none;
@@ -261,7 +284,7 @@ QComboBox QAbstractItemView::item:hover {{
     background: {BG_HOVER};
 }}
 
-QSpinBox {{
+QSpinBox, QDoubleSpinBox {{
     background: {BG_RAISED};
     border: 1px solid {BORDER};
     border-radius: {RADIUS};
@@ -270,19 +293,32 @@ QSpinBox {{
     color: #d0d0d0;
 }}
 
-QSpinBox:focus {{
-    border-color: {BORDER_FOCUS};
-}}
+QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {BORDER_FOCUS}; }}
 
-QSpinBox::up-button, QSpinBox::down-button {{
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
     background: {BG_HOVER};
     border: none;
     width: 18px;
 }}
 
-QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
     background: #252525;
 }}
+
+QLineEdit {{
+    background: {BG_RAISED};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS};
+    padding: 4px 10px;
+    color: {TEXT_BRIGHT};
+    min-height: 26px;
+}}
+
+QLineEdit:focus {{ border-color: {BORDER_FOCUS}; }}
+
+/* ── Sliders ── */
 
 QSlider::groove:horizontal {{
     height: 3px;
@@ -299,14 +335,14 @@ QSlider::handle:horizontal {{
     margin: -6px 0;
 }}
 
-QSlider::handle:horizontal:hover {{
-    background: {ACTIVE_BG};
-}}
+QSlider::handle:horizontal:hover {{ background: {ACTIVE_BG}; }}
 
 QSlider::sub-page:horizontal {{
     background: {BORDER_HOVER};
     border-radius: 2px;
 }}
+
+/* ── Scrollbars ── */
 
 QScrollBar:vertical {{
     background: transparent;
@@ -315,45 +351,46 @@ QScrollBar:vertical {{
 }}
 
 QScrollBar::handle:vertical {{
-    background: #333333;
+    background: #2a2a2a;
     border-radius: 3px;
     min-height: 24px;
 }}
 
-QScrollBar::handle:vertical:hover {{
-    background: {BORDER};
-}}
-
+QScrollBar::handle:vertical:hover {{ background: {BORDER}; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-
-QLineEdit {{
-    background: {BG_RAISED};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS};
-    padding: 4px 10px;
-    color: {TEXT_BRIGHT};
-    min-height: 26px;
-}}
-
-QLineEdit:focus {{
-    border-color: {BORDER_FOCUS};
-}}
-
-QInputDialog, QMessageBox {{
-    background: {BG};
-}}
-
-QMessageBox QLabel, QInputDialog QLabel {{
-    background: transparent;
-    color: {TEXT};
-}}
 
 QScrollArea {{
     border: none;
     background: transparent;
 }}
+
+/* ── Dialogs ── */
+
+QInputDialog, QMessageBox {{ background: {BG}; }}
+QMessageBox QLabel, QInputDialog QLabel {{ background: transparent; color: {TEXT}; }}
 """
+
+
+_PAGES = [
+    ("Wi-Fi",       "network-wireless",                         WifiTab),
+    ("Bluetooth",   "bluetooth",                                BluetoothTab),
+    ("Displays",    "video-display",                            DisplaysTab),
+    ("Sound",       "audio-volume-high",                        SoundTab),
+    ("Apps",        "preferences-desktop-default-applications", AppsTab),
+    ("Appearance",  "preferences-desktop-theme",                AppearanceTab),
+    ("System",      "preferences-system",                       SystemTab),
+]
+
+_TAB_FLAGS = [
+    ({"--wifi"},                          0),
+    ({"--bluetooth"},                     1),
+    ({"--displays"},                      2),
+    ({"--sound"},                         3),
+    ({"--apps"},                          4),
+    ({"--appearance", "--appearence"},    5),
+    ({"--system"},                        6),
+]
 
 
 def main():
@@ -366,39 +403,83 @@ def main():
 
     window = QMainWindow()
     window.setWindowTitle("Settings")
-    window.setMinimumSize(880, 580)
+    window.setMinimumSize(960, 620)
 
-    tabs = QTabWidget()
-    tabs.tabBar().setExpanding(False)
+    # Root layout: sidebar | line | stack
+    root_widget = QWidget()
+    root = QHBoxLayout(root_widget)
+    root.setContentsMargins(0, 0, 0, 0)
+    root.setSpacing(0)
 
-    tabs.addTab(WifiTab(), "Wi-Fi")
-    tabs.addTab(BluetoothTab(), "Bluetooth")
-    tabs.addTab(DisplaysTab(), "Displays")
-    tabs.addTab(SoundTab(), "Sound")
-    tabs.addTab(AppsTab(), "Apps")
-    tabs.addTab(AppearanceTab(), "Appearance")
-    tabs.addTab(SystemTab(), "System")
+    # Sidebar
+    sidebar = QWidget()
+    sidebar.setObjectName("sidebar")
+    sidebar.setFixedWidth(215)
+    sb = QVBoxLayout(sidebar)
+    sb.setContentsMargins(14, 28, 14, 28)
+    sb.setSpacing(3)
 
-    _TAB_FLAGS = [
-        ({"--wifi"},                    0),
-        ({"--bluetooth"},               1),
-        ({"--displays"},                2),
-        ({"--sound"},                   3),
-        ({"--apps"},                    4),
-        ({"--appearance", "--appearence"}, 5),
-        ({"--system"},                  6),
-    ]
+    title_lbl = QLabel("Settings")
+    title_lbl.setObjectName("appTitle")
+    sb.addWidget(title_lbl)
+    sb.addSpacing(18)
+
+    stack = QStackedWidget()
+    btn_group = QButtonGroup()
+    btn_group.setExclusive(True)
+
+    def _goto(idx):
+        stack.setCurrentIndex(idx)
+        btn_group.button(idx).setChecked(True)
+
+    for i, (label, icon_name, PageClass) in enumerate(_PAGES):
+        stack.addWidget(PageClass())
+
+        btn = QPushButton(f"  {label}")
+        btn.setObjectName("navBtn")
+        btn.setCheckable(True)
+        icon = QIcon.fromTheme(icon_name)
+        if not icon.isNull():
+            btn.setIcon(icon)
+            btn.setIconSize(QSize(16, 16))
+        btn.clicked.connect(lambda _, idx=i: _goto(idx))
+        btn_group.addButton(btn, i)
+        sb.addWidget(btn)
+
+    sb.addStretch()
+
+    root.addWidget(sidebar)
+
+    line = QFrame()
+    line.setObjectName("sidebarLine")
+    line.setFrameShape(QFrame.VLine)
+    line.setFixedWidth(1)
+    root.addWidget(line)
+
+    content = QWidget()
+    cl = QVBoxLayout(content)
+    cl.setContentsMargins(0, 12, 0, 0)
+    cl.setSpacing(0)
+    cl.addWidget(stack)
+    root.addWidget(content, stretch=1)
+    window.setCentralWidget(root_widget)
+
+    # Initial tab from CLI args
+    initial = 0
     argv = set(sys.argv[1:])
     for flags, idx in _TAB_FLAGS:
         if flags & argv:
-            tabs.setCurrentIndex(idx)
+            initial = idx
             break
+    _goto(initial)
 
-    for i in range(tabs.count()):
+    # Alt+N shortcuts
+    for i in range(len(_PAGES)):
         QShortcut(QKeySequence(f"Alt+{i + 1}"), window).activated.connect(
-            lambda idx=i: tabs.setCurrentIndex(idx)
+            lambda idx=i: _goto(idx)
         )
 
+    # Zoom
     def zoom(delta):
         global _base_font
         _base_font = max(10, min(32, _base_font + delta))
@@ -409,9 +490,7 @@ def main():
     QShortcut(QKeySequence("Ctrl+-"), window).activated.connect(lambda: zoom(-1))
     QShortcut(QKeySequence("Ctrl+0"), window).activated.connect(lambda: zoom(16 - _base_font))
 
-    window.setCentralWidget(tabs)
     window.show()
-
     sys.exit(app.exec())
 
 
