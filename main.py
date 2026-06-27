@@ -360,6 +360,21 @@ def main():
     tabs.addTab(AppearanceTab(), "Appearance")
     tabs.addTab(SystemTab(), "System")
 
+    _TAB_FLAGS = [
+        ({"--wifi"},                    0),
+        ({"--bluetooth"},               1),
+        ({"--displays"},                2),
+        ({"--sound"},                   3),
+        ({"--apps"},                    4),
+        ({"--appearance", "--appearence"}, 5),
+        ({"--system"},                  6),
+    ]
+    argv = set(sys.argv[1:])
+    for flags, idx in _TAB_FLAGS:
+        if flags & argv:
+            tabs.setCurrentIndex(idx)
+            break
+
     for i in range(tabs.count()):
         QShortcut(QKeySequence(f"Alt+{i + 1}"), window).activated.connect(
             lambda idx=i: tabs.setCurrentIndex(idx)
