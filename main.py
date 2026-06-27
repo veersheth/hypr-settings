@@ -22,7 +22,7 @@ from system_tab import SystemTab
 _LOCK_FILE = os.path.join(tempfile.gettempdir(), f"hypr-settings-{os.getenv('USER', 'user')}.lock")
 _lock_fh   = None
 _is_dark   = True
-_base_font = 16
+_base_font = 17
 
 
 def _acquire_lock():
@@ -530,6 +530,15 @@ def main():
         QShortcut(QKeySequence(f"Alt+{i + 1}"), window).activated.connect(
             lambda idx=i: _goto(idx)
         )
+
+    # Ctrl+Tab / Ctrl+Shift+Tab cycle
+    n = len(_PAGES)
+    QShortcut(QKeySequence("Ctrl+Tab"), window).activated.connect(
+        lambda: _goto((stack.currentIndex() + 1) % n)
+    )
+    QShortcut(QKeySequence("Ctrl+Shift+Tab"), window).activated.connect(
+        lambda: _goto((stack.currentIndex() - 1) % n)
+    )
 
     # Zoom
     def zoom(delta):
