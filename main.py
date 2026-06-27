@@ -6,7 +6,7 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QFont, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QFrame, QHBoxLayout,
-    QLabel, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QLabel, QMainWindow, QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from wifi_tab import WifiTab
@@ -90,7 +90,7 @@ QPushButton#navBtn {{
     border: none;
     border-radius: 6px;
     color: {TEXT_MUTED};
-    font-size: {b-1}px;
+    font-size: {b}px;
     font-weight: 500;
     text-align: left;
     padding: 9px 14px;
@@ -198,7 +198,7 @@ QListWidget {{
 }}
 
 QListWidget::item {{
-    padding: 8px 10px;
+    padding: 12px 14px;
     border-radius: 5px;
     color: #c8c8c8;
 }}
@@ -405,16 +405,21 @@ def main():
     window.setWindowTitle("Settings")
     window.setMinimumSize(960, 620)
 
-    # Root layout: sidebar | line | stack
+    # Root: splitter with sidebar | content
     root_widget = QWidget()
     root = QHBoxLayout(root_widget)
     root.setContentsMargins(0, 0, 0, 0)
     root.setSpacing(0)
 
+    splitter = QSplitter()
+    splitter.setHandleWidth(1)
+    splitter.setStyleSheet(f"QSplitter::handle {{ background: {SEP}; }}")
+
     # Sidebar
     sidebar = QWidget()
     sidebar.setObjectName("sidebar")
-    sidebar.setFixedWidth(215)
+    sidebar.setMinimumWidth(160)
+    sidebar.setMaximumWidth(400)
     sb = QVBoxLayout(sidebar)
     sb.setContentsMargins(14, 28, 14, 28)
     sb.setSpacing(3)
@@ -448,20 +453,19 @@ def main():
 
     sb.addStretch()
 
-    root.addWidget(sidebar)
-
-    line = QFrame()
-    line.setObjectName("sidebarLine")
-    line.setFrameShape(QFrame.VLine)
-    line.setFixedWidth(1)
-    root.addWidget(line)
-
     content = QWidget()
     cl = QVBoxLayout(content)
-    cl.setContentsMargins(0, 12, 0, 0)
+    cl.setContentsMargins(0, 32, 0, 0)
     cl.setSpacing(0)
     cl.addWidget(stack)
-    root.addWidget(content, stretch=1)
+
+    splitter.addWidget(sidebar)
+    splitter.addWidget(content)
+    splitter.setSizes([260, 700])
+    splitter.setStretchFactor(0, 0)
+    splitter.setStretchFactor(1, 1)
+
+    root.addWidget(splitter)
     window.setCentralWidget(root_widget)
 
     # Initial tab from CLI args
