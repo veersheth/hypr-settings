@@ -1,4 +1,4 @@
-<img width="938" height="878" alt="Group 6(1)" src="https://github.com/user-attachments/assets/630bee76-1b92-4634-b047-c89334b01ac2" />
+<img width="1260" height="1080" alt="image" src="https://github.com/user-attachments/assets/d3e09459-55d8-41cb-a650-a1dddd44a93a" />
 
 A PySide6 settings GUI for Hyprland / Wayland desktops. 
 
