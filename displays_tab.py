@@ -1,6 +1,6 @@
 import json
 import os
-from PySide6.QtCore import Qt, QRect, QPoint, Signal
+from PySide6.QtCore import Qt, QRect, QPoint, QThread, Signal
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
@@ -9,14 +9,13 @@ from PySide6.QtWidgets import (
 from common import run, separator, make_centered
 
 MONITORS_LUA = os.path.expanduser("~/.config/hypr/monitors.lua")
-HYPRLAND_LUA = os.path.expanduser("~/.config/hypr/hyprland.lua")
-DOFILE_LINE = 'dofile(os.getenv("HOME").."/.config/hypr/monitors.lua")'
-COLORS = ["#2a5298", "#7b2d8b", "#1e7a4a", "#8b4513", "#1a6b8a", "#6b1a3a"]
 
 TRANSFORMS = [
     ("Normal", 0), ("90°", 1), ("180°", 2), ("270°", 3),
     ("Flipped", 4), ("Flipped + 90°", 5), ("Flipped + 180°", 6), ("Flipped + 270°", 7),
 ]
+
+COLORS = ["#2a5298", "#7b2d8b", "#1e7a4a", "#8b4513", "#1a6b8a", "#6b1a3a"]
 
 
 def _parse_mode(s):
@@ -44,17 +43,11 @@ def _load_monitors():
     return monitors, None
 
 
-def _apply_monitor(m):
-    value = (
-        f"{m['name']},"
-        f"{m['width']}x{m['height']}@{m['refreshRate']:.2f},"
-        f"{m['x']}x{m['y']},"
-        f"{m.get('scale', 1.0)},"
-        f"transform,{m.get('transform', 0)}"
-    )
-    if m.get("mirror"):
-        value += f",mirror,{m['mirror']}"
-    return run(["hyprctl", "keyword", "monitor", value])
+def _logical_size(m):
+    s = m.get("scale", 1.0) or 1.0
+    t = m.get("transform", 0)
+    w, h = int(m["width"] / s), int(m["height"] / s)
+    return (h, w) if t in (1, 3, 5, 7) else (w, h)
 
 
 def _write_monitors_lua(monitors):
@@ -79,11 +72,41 @@ def _write_monitors_lua(monitors):
         f.write("\n".join(lines) + "\n")
 
 
-def _logical_size(m):
-    s = m.get("scale", 1.0) or 1.0
-    t = m.get("transform", 0)
-    w, h = int(m["width"] / s), int(m["height"] / s)
-    return (h, w) if t in (1, 3, 5, 7) else (w, h)
+def _preset_mirror(monitors):
+    """Return copies of monitors with all non-primary mirroring the focused one."""
+    if len(monitors) < 2:
+        return monitors, None
+    primary = next((m for m in monitors if m.get("focused")), monitors[0])
+    result = []
+    for m in monitors:
+        mc = dict(m)
+        mc["mirror"] = None if mc["name"] == primary["name"] else primary["name"]
+        result.append(mc)
+    return result, primary["name"]
+
+
+def _preset_extend(monitors):
+    """Return copies arranged side-by-side with no mirroring."""
+    sorted_mons = sorted(monitors, key=lambda m: (m.get("x", 0), m.get("y", 0)))
+    result = []
+    x_offset = 0
+    for m in sorted_mons:
+        mc = dict(m)
+        mc["mirror"] = None
+        mc["x"] = x_offset
+        mc["y"] = 0
+        lw, _ = _logical_size(mc)
+        x_offset += lw
+        result.append(mc)
+    return result
+
+
+class _ReloadThread(QThread):
+    done = Signal(bool)
+
+    def run(self):
+        _, ok = run(["hyprctl", "reload"])
+        self.done.emit(ok)
 
 
 # canvas
@@ -103,7 +126,7 @@ class _MonitorCanvas(QWidget):
         self._scale = 0.1
         self._min_x = 0
         self._min_y = 0
-        self.setMinimumHeight(220)
+        self.setMinimumHeight(200)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_monitors(self, monitors):
@@ -141,7 +164,7 @@ class _MonitorCanvas(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor("#080808"))
+        p.fillRect(self.rect(), QColor("#0a0a0a"))
         for i, m in enumerate(self._monitors):
             rect = self._rect(m)
             color = QColor(COLORS[i % len(COLORS)])
@@ -347,6 +370,8 @@ class _SettingsPanel(QWidget):
 class DisplaysTab(QWidget):
     def __init__(self):
         super().__init__()
+        self._monitors = []
+        self._reload_thread = None
         self._build_ui()
         self._load()
 
@@ -373,6 +398,19 @@ class DisplaysTab(QWidget):
         self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
 
+        # Quick presets
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(8)
+        self._mirror_btn = QPushButton("Mirror All")
+        self._mirror_btn.clicked.connect(self._on_mirror_preset)
+        self._extend_btn = QPushButton("Extend")
+        self._extend_btn.clicked.connect(self._on_extend_preset)
+        preset_row.addWidget(self._mirror_btn)
+        preset_row.addWidget(self._extend_btn)
+        preset_row.addStretch()
+        root.addLayout(preset_row)
+
+        # Canvas + detail
         body = QHBoxLayout()
         body.setSpacing(0)
 
@@ -394,73 +432,83 @@ class DisplaysTab(QWidget):
 
         root.addLayout(body, stretch=1)
 
-        hint_row = QHBoxLayout()
-        hint_row.setSpacing(8)
-        self._hint_lbl = QLabel(f"Saved to {MONITORS_LUA}. Add the dofile line to hyprland.lua to load on boot.")
-        self._hint_lbl.setObjectName("statusLabel")
-        self._hint_lbl.setWordWrap(True)
-        hint_row.addWidget(self._hint_lbl, stretch=1)
-        self._add_cfg_btn = QPushButton("Add to hyprland.lua")
-        self._add_cfg_btn.clicked.connect(self._add_to_config)
-        hint_row.addWidget(self._add_cfg_btn)
-        self._hint_widget = QWidget()
-        self._hint_widget.setLayout(hint_row)
-        self._hint_widget.setVisible(False)
-        root.addWidget(self._hint_widget)
-
     def _load(self):
         monitors, err = _load_monitors()
         if err:
             self._status_lbl.setText(f"Error: {err}")
             return
-        self._canvas.set_monitors(monitors)
+        self._monitors = monitors
+        self._canvas.set_monitors(self._monitors)
         self._settings.setVisible(False)
         n = len(monitors)
-        self._status_lbl.setText(f"{n} display(s) - drag to arrange, click to configure")
+        self._status_lbl.setText(
+            f"{n} display(s) — drag to reposition, click to configure"
+        )
 
     def _on_select(self, monitor):
         if monitor:
-            self._settings.show_monitor(monitor, self._canvas._monitors)
+            self._settings.show_monitor(monitor, self._monitors)
         else:
             self._settings.setVisible(False)
 
     def _on_monitor_moved(self, x, y):
         self._settings.update_position(x, y)
 
-    def _add_to_config(self):
-        try:
-            try:
-                with open(HYPRLAND_LUA, encoding="utf-8") as f:
-                    content = f.read()
-            except OSError:
-                content = ""
-            if "monitors.lua" in content:
-                self._hint_lbl.setText("Already present in hyprland.lua.")
-                self._add_cfg_btn.setEnabled(False)
-                return
-            with open(HYPRLAND_LUA, "a", encoding="utf-8") as f:
-                f.write(f"\n{DOFILE_LINE}\n")
-            self._hint_lbl.setText("Added to hyprland.lua.")
-            self._add_cfg_btn.setEnabled(False)
-        except OSError as e:
-            self._hint_lbl.setText(f"Failed to write hyprland.lua: {e}")
+    def _set_busy(self, busy):
+        self._apply_btn.setEnabled(not busy)
+        self._reload_btn.setEnabled(not busy)
+        self._mirror_btn.setEnabled(not busy)
+        self._extend_btn.setEnabled(not busy)
 
     def _apply(self):
-        monitors = self._canvas._monitors
-        if not monitors:
-            return
-        failed = []
-        for m in monitors:
-            _, ok = _apply_monitor(m)
-            if not ok:
-                failed.append(m["name"])
-        if failed:
-            self._status_lbl.setText(f"Failed to apply: {', '.join(failed)}")
+        if not self._monitors:
             return
         try:
-            _write_monitors_lua(monitors)
-            self._status_lbl.setText("Applied and saved")
-            self._hint_widget.setVisible(True)
+            _write_monitors_lua(self._monitors)
         except OSError as e:
-            self._status_lbl.setText(f"Applied (save failed: {e})")
+            self._status_lbl.setText(f"Save failed: {e}")
+            return
+        self._set_busy(True)
+        self._status_lbl.setText("Reloading Hyprland config…")
+        self._reload_thread = _ReloadThread()
+        self._reload_thread.done.connect(self._on_reload_done)
+        self._reload_thread.start()
+
+    def _on_reload_done(self, ok):
+        self._set_busy(False)
+        if ok:
+            self._status_lbl.setText("Applied and saved")
+        else:
+            self._status_lbl.setText("Saved — Hyprland reload failed, restart to apply")
         self._load()
+
+    def _on_mirror_preset(self):
+        if not self._monitors:
+            return
+        if len(self._monitors) < 2:
+            self._status_lbl.setText("Only one display connected — connect another to mirror")
+            return
+        result, primary_name = _preset_mirror(self._monitors)
+        self._monitors = result
+        self._canvas.set_monitors(self._monitors)
+        self._settings.setVisible(False)
+        self._status_lbl.setText(
+            f"Set to mirror {primary_name} — click Apply to save"
+        )
+
+    def _on_extend_preset(self):
+        if not self._monitors:
+            return
+        result = _preset_extend(self._monitors)
+        self._monitors = result
+        self._canvas.set_monitors(self._monitors)
+        self._settings.setVisible(False)
+        # Live: move one workspace per secondary monitor
+        if len(result) > 1:
+            cmds = [
+                f"dispatch moveworkspacetomonitor {i + 1} {m['name']}"
+                for i, m in enumerate(result)
+            ]
+            run(["hyprctl", "--batch", " ; ".join(cmds)])
+        names = " + ".join(m["name"] for m in result)
+        self._status_lbl.setText(f"Extending: {names} — click Apply to save")
