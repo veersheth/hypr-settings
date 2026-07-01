@@ -146,8 +146,15 @@ def _preset_extend(monitors):
 class _ReloadThread(QThread):
     done = Signal(bool)
 
+    def __init__(self, dispatch_cmds=None):
+        super().__init__()
+        self._dispatch_cmds = dispatch_cmds or []
+
     def run(self):
         _, ok = run(["hyprctl", "reload"])
+        if ok:
+            for cmd in self._dispatch_cmds:
+                run(["hyprctl", "dispatch", cmd])
         self.done.emit(ok)
 
 
@@ -586,7 +593,13 @@ class DisplaysTab(QWidget):
             return
         self._set_busy(True)
         self._status_lbl.setText("Reloading Hyprland config…")
-        self._reload_thread = _ReloadThread()
+        dispatch_cmds = []
+        for m in self._monitors:
+            for ws_id in m.get("_workspaces", []):
+                dispatch_cmds.append(
+                    "hl.dsp.workspace.move({ monitor = '" + m["name"] + "', workspace = " + str(ws_id) + " })"
+                )
+        self._reload_thread = _ReloadThread(dispatch_cmds)
         self._reload_thread.done.connect(self._on_reload_done)
         self._reload_thread.start()
 
