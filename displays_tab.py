@@ -4,7 +4,7 @@ import re
 from PySide6.QtCore import Qt, QRect, QPoint, QThread, Signal
 from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 from common import run, separator, make_centered
@@ -52,12 +52,19 @@ def _logical_size(m):
     return (h, w) if t in (1, 3, 5, 7) else (w, h)
 
 
-def _write_monitors_lua(monitors):
+def _output_key(m, use_edid):
+    desc = m.get("description", "").strip()
+    if use_edid and desc:
+        return "desc:" + desc.replace('"', '\\"')
+    return m["name"]
+
+
+def _write_monitors_lua(monitors, use_edid=False):
     lines = []
     for m in monitors:
         scale = m.get("scale", 1.0)
         parts = [
-            f'output = "{m["name"]}"',
+            f'output = "{_output_key(m, use_edid)}"',
             f'mode = "{m["width"]}x{m["height"]}@{m["refreshRate"]:.0f}"',
             f'position = "{m["x"]}x{m["y"]}"',
             f'scale = {scale:.2g}',
@@ -490,6 +497,12 @@ class DisplaysTab(QWidget):
         title.setObjectName("pageTitle")
         header.addWidget(title)
         header.addStretch()
+        self._edid_cb = QCheckBox("Match by display ID")
+        self._edid_cb.setToolTip(
+            "Use display description (EDID) instead of port name.\n"
+            "Arrangement survives plugging into a different port."
+        )
+        header.addWidget(self._edid_cb)
         self._apply_btn = QPushButton("Apply")
         self._apply_btn.clicked.connect(self._apply)
         self._reload_btn = QPushButton("Reload")
@@ -561,12 +574,13 @@ class DisplaysTab(QWidget):
         self._reload_btn.setEnabled(not busy)
         self._mirror_btn.setEnabled(not busy)
         self._extend_btn.setEnabled(not busy)
+        self._edid_cb.setEnabled(not busy)
 
     def _apply(self):
         if not self._monitors:
             return
         try:
-            _write_monitors_lua(self._monitors)
+            _write_monitors_lua(self._monitors, use_edid=self._edid_cb.isChecked())
         except OSError as e:
             self._status_lbl.setText(f"Save failed: {e}")
             return
