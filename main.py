@@ -18,6 +18,7 @@ from sound_tab import SoundTab
 from apps_tab import AppsTab
 from appearance_tab import AppearanceTab
 from system_tab import SystemTab
+from about_tab import AboutTab
 
 _LOCK_FILE = os.path.join(tempfile.gettempdir(), f"hypr-settings-{os.getenv('USER', 'user')}.lock")
 _lock_fh   = None
@@ -189,6 +190,11 @@ QLabel#statusLabel {{
 
 QLabel#fieldLabel {{
     color: {TEXT_DIM};
+}}
+
+QLabel a {{
+    color: {TEXT_DIM};
+    text-decoration: underline;
 }}
 
 /* ── Buttons ── */
@@ -500,6 +506,19 @@ def main():
         sb.addWidget(btn)
 
     sb.addStretch()
+
+    about_idx = len(_PAGES)
+    stack.addWidget(AboutTab())
+    about_btn = QPushButton("  About")
+    about_btn.setObjectName("navBtn")
+    about_btn.setCheckable(True)
+    about_icon = QIcon.fromTheme("help-about")
+    if not about_icon.isNull():
+        about_btn.setIcon(about_icon)
+        about_btn.setIconSize(QSize(16, 16))
+    about_btn.clicked.connect(lambda: _goto(about_idx))
+    btn_group.addButton(about_btn, about_idx)
+    sb.addWidget(about_btn)
 
     content = QWidget()
     cl = QVBoxLayout(content)
