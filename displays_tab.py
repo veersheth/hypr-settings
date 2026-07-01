@@ -1,10 +1,11 @@
 import json
 import os
+import re
 from PySide6.QtCore import Qt, QRect, QPoint, QThread, Signal
-from PySide6.QtGui import QPainter, QColor
+from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
-    QLabel, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 from common import run, separator, make_centered
 
@@ -40,6 +41,7 @@ def _load_monitors():
     for m in monitors:
         raw = m.get("mirrorOf", "none")
         m["mirror"] = None if raw == "none" else raw
+        m.setdefault("_workspaces", [])
     return monitors, None
 
 
@@ -67,13 +69,46 @@ def _write_monitors_lua(monitors):
         if m.get("disabled"):
             parts.append("disabled = true")
         lines.append("hl.monitor({ " + ", ".join(parts) + " })")
+
+    ws_lines = []
+    for m in monitors:
+        ws_ids = m.get("_workspaces", [])
+        if not ws_ids or m.get("mirror"):
+            continue
+        for i, ws in enumerate(ws_ids):
+            rule_parts = [
+                f'workspace = "name:{ws}"',
+                f'monitor = "{m["name"]}"',
+            ]
+            if i == 0:
+                rule_parts.append("default = true")
+            ws_lines.append("hl.workspace_rule({ " + ", ".join(rule_parts) + " })")
+
+    if ws_lines:
+        lines.append("")
+        lines.extend(ws_lines)
+
     os.makedirs(os.path.dirname(MONITORS_LUA), exist_ok=True)
     with open(MONITORS_LUA, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
 
+def _parse_workspace_input(text):
+    ids = []
+    for part in re.split(r"[,\s]+", text.strip()):
+        part = part.strip()
+        if not part:
+            continue
+        hit = re.match(r"^(\d+)-(\d+)$", part)
+        if hit:
+            a, b = int(hit.group(1)), int(hit.group(2))
+            ids.extend(range(min(a, b), max(a, b) + 1))
+        elif part.isdigit():
+            ids.append(int(part))
+    return sorted(set(ids))
+
+
 def _preset_mirror(monitors):
-    """Return copies of monitors with all non-primary mirroring the focused one."""
     if len(monitors) < 2:
         return monitors, None
     primary = next((m for m in monitors if m.get("focused")), monitors[0])
@@ -81,12 +116,12 @@ def _preset_mirror(monitors):
     for m in monitors:
         mc = dict(m)
         mc["mirror"] = None if mc["name"] == primary["name"] else primary["name"]
+        mc["_workspaces"] = []
         result.append(mc)
     return result, primary["name"]
 
 
 def _preset_extend(monitors):
-    """Return copies arranged side-by-side with no mirroring."""
     sorted_mons = sorted(monitors, key=lambda m: (m.get("x", 0), m.get("y", 0)))
     result = []
     x_offset = 0
@@ -109,84 +144,131 @@ class _ReloadThread(QThread):
         self.done.emit(ok)
 
 
-# canvas
+# ── Canvas ──────────────────────────────────────────────────────────────────
 
 class _MonitorCanvas(QWidget):
     monitor_selected = Signal(object)
-    monitor_moved = Signal(int, int)
+    position_changed = Signal(int, int)
 
-    PAD = 24
+    PAD = 32
 
     def __init__(self):
         super().__init__()
         self._monitors = []
         self._sel = -1
         self._drag = -1
-        self._drag_off = QPoint()
+        # Drag state — frozen at press time so the monitor tracks the cursor exactly
+        self._drag_screen_off = QPoint()
+        self._drag_min_x = 0
+        self._drag_min_y = 0
+        self._drag_scale = 0.1
         self._scale = 0.1
         self._min_x = 0
         self._min_y = 0
-        self.setMinimumHeight(200)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumHeight(300)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def set_monitors(self, monitors):
         self._monitors = monitors
         self._sel = -1
+        self._drag = -1
         self._recompute()
         self.update()
 
     def _recompute(self):
         if not self._monitors:
             return
-        lw = [_logical_size(m)[0] for m in self._monitors]
-        lh = [_logical_size(m)[1] for m in self._monitors]
+        lws = [_logical_size(m)[0] for m in self._monitors]
+        lhs = [_logical_size(m)[1] for m in self._monitors]
         self._min_x = min(m["x"] for m in self._monitors)
         self._min_y = min(m["y"] for m in self._monitors)
-        total_w = max(m["x"] + w for m, w in zip(self._monitors, lw)) - self._min_x
-        total_h = max(m["y"] + h for m, h in zip(self._monitors, lh)) - self._min_y
+        total_w = max(m["x"] + w for m, w in zip(self._monitors, lws)) - self._min_x
+        total_h = max(m["y"] + h for m, h in zip(self._monitors, lhs)) - self._min_y
         avail_w = max(self.width() - 2 * self.PAD, 1)
         avail_h = max(self.height() - 2 * self.PAD, 1)
         if total_w > 0 and total_h > 0:
             self._scale = min(avail_w / total_w, avail_h / total_h)
 
-    def _rect(self, m):
+    def _rect(self, m, min_x=None, min_y=None, scale=None):
         lw, lh = _logical_size(m)
-        x = int((m["x"] - self._min_x) * self._scale) + self.PAD
-        y = int((m["y"] - self._min_y) * self._scale) + self.PAD
-        return QRect(x, y, max(int(lw * self._scale), 20), max(int(lh * self._scale), 20))
+        mx = self._min_x if min_x is None else min_x
+        my = self._min_y if min_y is None else min_y
+        sc = self._scale if scale is None else scale
+        x = int((m["x"] - mx) * sc) + self.PAD
+        y = int((m["y"] - my) * sc) + self.PAD
+        return QRect(x, y, max(int(lw * sc), 20), max(int(lh * sc), 20))
 
-    def _to_logical(self, p):
-        return (
-            max(0, int((p.x() - self.PAD) / self._scale) + self._min_x),
-            max(0, int((p.y() - self.PAD) / self._scale) + self._min_y),
-        )
+    def _snap(self, idx):
+        if len(self._monitors) > 1:
+            self._force_touch(idx)
+
+    def _force_touch(self, idx):
+        m = self._monitors[idx]
+        lw, lh = _logical_size(m)
+        best_d = float("inf")
+        best_dx = best_dy = 0
+        for i, other in enumerate(self._monitors):
+            if i == idx:
+                continue
+            ow, oh = _logical_size(other)
+            ox, oy = other["x"], other["y"]
+            for sdx, sdy in [
+                ((m["x"] + lw) - ox,  0),   # m right → other left
+                (m["x"] - (ox + ow),  0),   # m left  → other right
+                (0, (m["y"] + lh) - oy),    # m bottom → other top
+                (0,  m["y"] - (oy + oh)),   # m top   → other bottom
+            ]:
+                d = abs(sdx) + abs(sdy)
+                if d < best_d:
+                    best_d = d
+                    best_dx, best_dy = sdx, sdy
+        m["x"] -= int(best_dx)
+        m["y"] -= int(best_dy)
 
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor("#0a0a0a"))
+        p.fillRect(self.rect(), QColor("#141414"))
+
+        font = p.font()
+        font.setPixelSize(12)
+        p.setFont(font)
+
+        # During drag use frozen scale/origin so other monitors don't shift while dragging
+        min_x = self._drag_min_x if self._drag >= 0 else self._min_x
+        min_y = self._drag_min_y if self._drag >= 0 else self._min_y
+        scale = self._drag_scale if self._drag >= 0 else self._scale
+
         for i, m in enumerate(self._monitors):
-            rect = self._rect(m)
+            rect = self._rect(m, min_x, min_y, scale)
             color = QColor(COLORS[i % len(COLORS)])
-            if i == self._sel:
-                color = color.lighter(155)
-            p.fillRect(rect, color)
-            p.setPen(QColor("#ffffff"))
+            selected = (i == self._sel)
+            p.fillRect(rect, color.lighter(145) if selected else color)
+            if selected:
+                p.setPen(QPen(QColor("#ffffff"), 2))
+                p.drawRect(rect.adjusted(1, 1, -1, -1))
             lw, lh = _logical_size(m)
-            label = f"{m['name']}\n{lw}×{lh}"
+            label = m["name"] + "\n" + str(lw) + "×" + str(lh)
             if m.get("mirror"):
-                label += f"\n⟶ {m['mirror']}"
-            p.drawText(rect, Qt.AlignCenter, label)
+                label += "\n→ " + m["mirror"]
+            p.setPen(QColor("#ffffff"))
+            p.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, label)
+
         p.end()
 
     def mousePressEvent(self, e):
         if e.button() != Qt.LeftButton:
             return
         for i in range(len(self._monitors) - 1, -1, -1):
-            if self._rect(self._monitors[i]).contains(e.pos()):
+            r = self._rect(self._monitors[i])
+            if r.contains(e.pos()):
                 self._sel = i
                 self._drag = i
-                self._drag_off = e.pos() - self._rect(self._monitors[i]).topLeft()
+                self._drag_screen_off = e.pos() - r.topLeft()
+                # Freeze coordinate system so monitor tracks cursor exactly during drag
+                self._drag_min_x = self._min_x
+                self._drag_min_y = self._min_y
+                self._drag_scale = self._scale
                 self.monitor_selected.emit(self._monitors[i])
                 self.update()
                 return
@@ -197,22 +279,30 @@ class _MonitorCanvas(QWidget):
     def mouseMoveEvent(self, e):
         if self._drag < 0:
             return
-        rx, ry = self._to_logical(e.pos() - self._drag_off)
-        self._monitors[self._drag]["x"] = rx
-        self._monitors[self._drag]["y"] = ry
-        self.monitor_moved.emit(rx, ry)
+        m = self._monitors[self._drag]
+        top_left = e.pos() - self._drag_screen_off
+        # Use frozen origin/scale: monitor top-left follows cursor 1:1
+        m["x"] = int((top_left.x() - self.PAD) / self._drag_scale) + self._drag_min_x
+        m["y"] = int((top_left.y() - self.PAD) / self._drag_scale) + self._drag_min_y
+        self.position_changed.emit(m["x"], m["y"])
         self.update()
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton:
+        if e.button() == Qt.LeftButton and self._drag >= 0:
+            self._snap(self._drag)
+            m = self._monitors[self._drag]
             self._drag = -1
+            self._recompute()
+            self.position_changed.emit(m["x"], m["y"])
+            self.update()
 
     def resizeEvent(self, _):
-        self._recompute()
+        if self._drag < 0:
+            self._recompute()
         self.update()
 
 
-# settings panel
+# ── Settings panel ──────────────────────────────────────────────────────────
 
 class _SettingsPanel(QWidget):
     def __init__(self):
@@ -279,6 +369,13 @@ class _SettingsPanel(QWidget):
         self._mirror_cb.currentIndexChanged.connect(self._on_mirror)
         row("Mirror", self._mirror_cb)
 
+        root.addWidget(separator())
+
+        self._ws_edit = QLineEdit()
+        self._ws_edit.setPlaceholderText("e.g. 1, 2, 3 or 1-5")
+        self._ws_edit.textChanged.connect(self._on_workspaces)
+        row("Workspaces", self._ws_edit)
+
         root.addStretch()
         self.setVisible(False)
 
@@ -324,6 +421,9 @@ class _SettingsPanel(QWidget):
         self._mirror_cb.setCurrentIndex(idx if idx >= 0 else 0)
         self._set_position_enabled(not bool(current_mirror))
 
+        ws_ids = m.get("_workspaces", [])
+        self._ws_edit.setText(", ".join(str(w) for w in ws_ids))
+
         self._busy = False
         self.setVisible(True)
 
@@ -364,8 +464,12 @@ class _SettingsPanel(QWidget):
         self._monitor["mirror"] = target
         self._set_position_enabled(not bool(target))
 
+    def _on_workspaces(self, text):
+        if not self._busy and self._monitor:
+            self._monitor["_workspaces"] = _parse_workspace_input(text)
 
-# main tab
+
+# ── Main tab ────────────────────────────────────────────────────────────────
 
 class DisplaysTab(QWidget):
     def __init__(self):
@@ -398,7 +502,6 @@ class DisplaysTab(QWidget):
         self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
 
-        # Quick presets
         preset_row = QHBoxLayout()
         preset_row.setSpacing(8)
         self._mirror_btn = QPushButton("Mirror All")
@@ -410,7 +513,6 @@ class DisplaysTab(QWidget):
         preset_row.addStretch()
         root.addLayout(preset_row)
 
-        # Canvas + detail
         body = QHBoxLayout()
         body.setSpacing(0)
 
@@ -418,7 +520,7 @@ class DisplaysTab(QWidget):
         canvas_wrap.setContentsMargins(0, 0, 16, 0)
         self._canvas = _MonitorCanvas()
         self._canvas.monitor_selected.connect(self._on_select)
-        self._canvas.monitor_moved.connect(self._on_monitor_moved)
+        self._canvas.position_changed.connect(self._on_position_changed)
         canvas_wrap.addWidget(self._canvas)
         body.addLayout(canvas_wrap, stretch=3)
 
@@ -451,7 +553,7 @@ class DisplaysTab(QWidget):
         else:
             self._settings.setVisible(False)
 
-    def _on_monitor_moved(self, x, y):
+    def _on_position_changed(self, x, y):
         self._settings.update_position(x, y)
 
     def _set_busy(self, busy):
@@ -477,10 +579,9 @@ class DisplaysTab(QWidget):
     def _on_reload_done(self, ok):
         self._set_busy(False)
         if ok:
-            self._status_lbl.setText("Applied and saved")
+            self._status_lbl.setText("Applied — click Reload to sync if Hyprland adjusted positions")
         else:
             self._status_lbl.setText("Saved — Hyprland reload failed, restart to apply")
-        self._load()
 
     def _on_mirror_preset(self):
         if not self._monitors:
@@ -492,9 +593,7 @@ class DisplaysTab(QWidget):
         self._monitors = result
         self._canvas.set_monitors(self._monitors)
         self._settings.setVisible(False)
-        self._status_lbl.setText(
-            f"Set to mirror {primary_name} — click Apply to save"
-        )
+        self._status_lbl.setText(f"Set to mirror {primary_name} — click Apply to save")
 
     def _on_extend_preset(self):
         if not self._monitors:
@@ -503,12 +602,5 @@ class DisplaysTab(QWidget):
         self._monitors = result
         self._canvas.set_monitors(self._monitors)
         self._settings.setVisible(False)
-        # Live: move one workspace per secondary monitor
-        if len(result) > 1:
-            cmds = [
-                f"dispatch moveworkspacetomonitor {i + 1} {m['name']}"
-                for i, m in enumerate(result)
-            ]
-            run(["hyprctl", "--batch", " ; ".join(cmds)])
         names = " + ".join(m["name"] for m in result)
         self._status_lbl.setText(f"Extending: {names} — click Apply to save")

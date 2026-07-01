@@ -22,7 +22,7 @@ from system_tab import SystemTab
 _LOCK_FILE = os.path.join(tempfile.gettempdir(), f"hypr-settings-{os.getenv('USER', 'user')}.lock")
 _lock_fh   = None
 _is_dark   = True
-_base_font = 17
+_base_font = 13
 
 
 def _acquire_lock():
@@ -442,7 +442,7 @@ def main():
     _is_dark = _detect_dark()
 
     app = QApplication(sys.argv)
-    app.setFont(QFont("sans", 16))
+    app.setFont(QFont("sans", 14))
     app.setStyleSheet(_qss())
 
     import common
