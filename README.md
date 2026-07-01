@@ -1,6 +1,6 @@
 <img width="1260" height="1080" alt="image" src="https://github.com/user-attachments/assets/d3e09459-55d8-41cb-a650-a1dddd44a93a" />
 
-This is for system settings only *not* to "tweak the look and feel of Hyprland"
+This is for system settings only, *not* to "tweak the look and feel of Hyprland"
 
 - WiFi
     - requires nmcli (NetworkManager)
