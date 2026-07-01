@@ -13,4 +13,15 @@ if [[ "$1" == "--install" ]]; then
     exit 0
 fi
 
+if [[ "$1" == "--uninstall" ]]; then
+    read -rp "Uninstall hypr-settings from user profile? [y/N] " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+        nix-env -e hypr-settings
+        echo "Uninstalled."
+    else
+        echo "Aborted."
+    fi
+    exit 0
+fi
+
 exec nix-shell shell.nix --run "python main.py"
