@@ -8,8 +8,18 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 from common import run, separator, make_centered
-
-MONITORS_LUA = os.path.expanduser("~/.config/hypr/monitors.lua")
+import signal
+import tempfile
+from monitor_profiles import (
+    profile_key   as _profile_key,
+    display_id    as _display_id,
+    load_profiles as _load_profiles,
+    save_profile  as _save_profile,
+    delete_profile as _delete_profile,
+    write_monitors_lua,
+    MONITORS_LUA,
+    daemon_pid    as _daemon_pid,
+)
 
 TRANSFORMS = [
     ("Normal", 0), ("90°", 1), ("180°", 2), ("270°", 3),
@@ -50,69 +60,6 @@ def _logical_size(m):
     t = m.get("transform", 0)
     w, h = int(m["width"] / s), int(m["height"] / s)
     return (h, w) if t in (1, 3, 5, 7) else (w, h)
-
-
-def _output_key(m, use_edid):
-    desc = m.get("description", "").strip()
-    if use_edid and desc:
-        return "desc:" + desc.replace('"', '\\"')
-    return m["name"]
-
-
-def _write_monitors_lua(monitors, use_edid=False):
-    lines = []
-    for m in monitors:
-        scale = m.get("scale", 1.0)
-        parts = [
-            f'output = "{_output_key(m, use_edid)}"',
-            f'mode = "{m["width"]}x{m["height"]}@{m["refreshRate"]:.0f}"',
-            f'position = "{m["x"]}x{m["y"]}"',
-            f'scale = {scale:.2g}',
-        ]
-        if m.get("transform", 0):
-            parts.append(f'transform = {m["transform"]}')
-        if m.get("mirror"):
-            parts.append(f'mirror = "{m["mirror"]}"')
-        if m.get("disabled"):
-            parts.append("disabled = true")
-        lines.append("hl.monitor({ " + ", ".join(parts) + " })")
-
-    ws_lines = []
-    for m in monitors:
-        ws_ids = m.get("_workspaces", [])
-        if not ws_ids or m.get("mirror"):
-            continue
-        for i, ws in enumerate(ws_ids):
-            rule_parts = [
-                f'workspace = "name:{ws}"',
-                f'monitor = "{m["name"]}"',
-            ]
-            if i == 0:
-                rule_parts.append("default = true")
-            ws_lines.append("hl.workspace_rule({ " + ", ".join(rule_parts) + " })")
-
-    if ws_lines:
-        lines.append("")
-        lines.extend(ws_lines)
-
-    os.makedirs(os.path.dirname(MONITORS_LUA), exist_ok=True)
-    with open(MONITORS_LUA, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-
-
-def _parse_workspace_input(text):
-    ids = []
-    for part in re.split(r"[,\s]+", text.strip()):
-        part = part.strip()
-        if not part:
-            continue
-        hit = re.match(r"^(\d+)-(\d+)$", part)
-        if hit:
-            a, b = int(hit.group(1)), int(hit.group(2))
-            ids.extend(range(min(a, b), max(a, b) + 1))
-        elif part.isdigit():
-            ids.append(int(part))
-    return sorted(set(ids))
 
 
 def _preset_mirror(monitors):
@@ -171,7 +118,6 @@ class _MonitorCanvas(QWidget):
         self._monitors = []
         self._sel = -1
         self._drag = -1
-        # Drag state — frozen at press time so the monitor tracks the cursor exactly
         self._drag_screen_off = QPoint()
         self._drag_min_x = 0
         self._drag_min_y = 0
@@ -227,10 +173,10 @@ class _MonitorCanvas(QWidget):
             ow, oh = _logical_size(other)
             ox, oy = other["x"], other["y"]
             for sdx, sdy in [
-                ((m["x"] + lw) - ox,  0),   # m right → other left
-                (m["x"] - (ox + ow),  0),   # m left  → other right
-                (0, (m["y"] + lh) - oy),    # m bottom → other top
-                (0,  m["y"] - (oy + oh)),   # m top   → other bottom
+                ((m["x"] + lw) - ox,  0),
+                (m["x"] - (ox + ow),  0),
+                (0, (m["y"] + lh) - oy),
+                (0,  m["y"] - (oy + oh)),
             ]:
                 d = abs(sdx) + abs(sdy)
                 if d < best_d:
@@ -248,7 +194,6 @@ class _MonitorCanvas(QWidget):
         font.setPixelSize(12)
         p.setFont(font)
 
-        # During drag use frozen scale/origin so other monitors don't shift while dragging
         min_x = self._drag_min_x if self._drag >= 0 else self._min_x
         min_y = self._drag_min_y if self._drag >= 0 else self._min_y
         scale = self._drag_scale if self._drag >= 0 else self._scale
@@ -279,7 +224,6 @@ class _MonitorCanvas(QWidget):
                 self._sel = i
                 self._drag = i
                 self._drag_screen_off = e.pos() - r.topLeft()
-                # Freeze coordinate system so monitor tracks cursor exactly during drag
                 self._drag_min_x = self._min_x
                 self._drag_min_y = self._min_y
                 self._drag_scale = self._scale
@@ -295,7 +239,6 @@ class _MonitorCanvas(QWidget):
             return
         m = self._monitors[self._drag]
         top_left = e.pos() - self._drag_screen_off
-        # Use frozen origin/scale: monitor top-left follows cursor 1:1
         m["x"] = int((top_left.x() - self.PAD) / self._drag_scale) + self._drag_min_x
         m["y"] = int((top_left.y() - self.PAD) / self._drag_scale) + self._drag_min_y
         self.position_changed.emit(m["x"], m["y"])
@@ -483,6 +426,21 @@ class _SettingsPanel(QWidget):
             self._monitor["_workspaces"] = _parse_workspace_input(text)
 
 
+def _parse_workspace_input(text):
+    ids = []
+    for part in re.split(r"[,\s]+", text.strip()):
+        part = part.strip()
+        if not part:
+            continue
+        hit = re.match(r"^(\d+)-(\d+)$", part)
+        if hit:
+            a, b = int(hit.group(1)), int(hit.group(2))
+            ids.extend(range(min(a, b), max(a, b) + 1))
+        elif part.isdigit():
+            ids.append(int(part))
+    return sorted(set(ids))
+
+
 # ── Main tab ────────────────────────────────────────────────────────────────
 
 class DisplaysTab(QWidget):
@@ -498,6 +456,7 @@ class DisplaysTab(QWidget):
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(10)
 
+        # ── Header ──
         header = QHBoxLayout()
         header.setSpacing(8)
         title = QLabel("Displays")
@@ -522,6 +481,24 @@ class DisplaysTab(QWidget):
         self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
 
+        # ── Profile banner ──
+        self._profile_bar = QWidget()
+        pb = QHBoxLayout(self._profile_bar)
+        pb.setContentsMargins(0, 0, 0, 0)
+        pb.setSpacing(8)
+        self._profile_lbl = QLabel()
+        self._profile_lbl.setObjectName("statusLabel")
+        pb.addWidget(self._profile_lbl, stretch=1)
+        self._restore_btn = QPushButton("Restore saved profile")
+        self._restore_btn.clicked.connect(self._restore_profile)
+        pb.addWidget(self._restore_btn)
+        self._delete_profile_btn = QPushButton("Delete profile")
+        self._delete_profile_btn.clicked.connect(self._delete_current_profile)
+        pb.addWidget(self._delete_profile_btn)
+        self._profile_bar.setVisible(False)
+        root.addWidget(self._profile_bar)
+
+        # ── Presets ──
         preset_row = QHBoxLayout()
         preset_row.setSpacing(8)
         self._mirror_btn = QPushButton("Mirror All")
@@ -533,6 +510,7 @@ class DisplaysTab(QWidget):
         preset_row.addStretch()
         root.addLayout(preset_row)
 
+        # ── Canvas + settings ──
         body = QHBoxLayout()
         body.setSpacing(0)
 
@@ -554,18 +532,142 @@ class DisplaysTab(QWidget):
 
         root.addLayout(body, stretch=1)
 
+        # ── Daemon status ──
+        root.addWidget(separator())
+        daemon_row = QHBoxLayout()
+        self._daemon_lbl = QLabel()
+        self._daemon_lbl.setObjectName("statusLabel")
+        daemon_row.addWidget(self._daemon_lbl, stretch=1)
+        self._daemon_btn = QPushButton()
+        self._daemon_btn.setFixedWidth(80)
+        self._daemon_btn.clicked.connect(self._toggle_daemon)
+        daemon_row.addWidget(self._daemon_btn)
+        root.addLayout(daemon_row)
+        self._refresh_daemon_status()
+
+    # ── Loading ──────────────────────────────────────────────────────────────
+
     def _load(self):
         monitors, err = _load_monitors()
         if err:
             self._status_lbl.setText(f"Error: {err}")
+            self._profile_bar.setVisible(False)
             return
         self._monitors = monitors
+
+        # hyprctl doesn't know about _workspaces — restore from saved profile
+        key = _profile_key(self._monitors)
+        profiles = _load_profiles()
+        if key in profiles:
+            saved_by_id = {_display_id(m): m for m in profiles[key]["monitors"]}
+            for m in self._monitors:
+                saved = saved_by_id.get(_display_id(m))
+                if saved:
+                    m["_workspaces"] = saved.get("_workspaces", [])
+
         self._canvas.set_monitors(self._monitors)
         self._settings.setVisible(False)
-        n = len(monitors)
+        self._update_profile_bar()
+
+    def _update_profile_bar(self):
+        n = len(self._monitors)
+        if not self._monitors:
+            self._status_lbl.setText("No displays detected")
+            self._profile_bar.setVisible(False)
+            return
+
+        key = _profile_key(self._monitors)
+        profiles = _load_profiles()
+        saved = key in profiles
+
         self._status_lbl.setText(
             f"{n} display(s) — drag to reposition, click to configure"
         )
+        self._profile_lbl.setText(
+            f"Profile: {key}   {'[saved]' if saved else '[not yet saved — click Apply]'}"
+        )
+        self._restore_btn.setVisible(saved)
+        self._delete_profile_btn.setVisible(saved)
+        self._profile_bar.setVisible(True)
+
+    # ── Apply / save ─────────────────────────────────────────────────────────
+
+    def _apply(self):
+        if not self._monitors:
+            return
+        use_edid = self._edid_cb.isChecked()
+        try:
+            write_monitors_lua(self._monitors, use_edid=use_edid)
+        except OSError as e:
+            self._status_lbl.setText(f"Save failed: {e}")
+            return
+
+        # Save profile for the current monitor combination
+        key = _profile_key(self._monitors)
+        _save_profile(key, self._monitors, use_edid)
+
+        self._set_busy(True)
+        self._status_lbl.setText("Reloading Hyprland config…")
+        dispatch_cmds = []
+        for m in self._monitors:
+            for ws_id in m.get("_workspaces", []):
+                dispatch_cmds.append(
+                    "hl.dsp.workspace.move({ monitor = '" + m["name"] + "', workspace = " + str(ws_id) + " })"
+                )
+        self._reload_thread = _ReloadThread(dispatch_cmds)
+        self._reload_thread.done.connect(self._on_reload_done)
+        self._reload_thread.start()
+
+    def _on_reload_done(self, ok):
+        self._set_busy(False)
+        key = _profile_key(self._monitors)
+        if ok:
+            self._status_lbl.setText(f"Applied — profile saved for: {key}")
+        else:
+            self._status_lbl.setText(f"Profile saved for: {key} — Hyprland reload failed, restart to apply")
+        self._update_profile_bar()
+
+    # ── Profile restore / delete ─────────────────────────────────────────────
+
+    def _restore_profile(self):
+        """Load saved profile settings into the UI without applying."""
+        key = _profile_key(self._monitors)
+        profiles = _load_profiles()
+        if key not in profiles:
+            return
+
+        saved = profiles[key]["monitors"]
+        use_edid = profiles[key].get("use_edid", False)
+        self._edid_cb.setChecked(use_edid)
+
+        # Map saved configs onto live monitors by display_id so availableModes
+        # and current port names are preserved from hyprctl.
+        saved_by_id = {_display_id(m): m for m in saved}
+        for m in self._monitors:
+            saved_m = saved_by_id.get(_display_id(m))
+            if not saved_m:
+                continue
+            m["width"]       = saved_m["width"]
+            m["height"]      = saved_m["height"]
+            m["refreshRate"] = saved_m["refreshRate"]
+            m["x"]           = saved_m["x"]
+            m["y"]           = saved_m["y"]
+            m["scale"]       = saved_m["scale"]
+            m["transform"]   = saved_m.get("transform", 0)
+            m["mirror"]      = saved_m.get("mirror")
+            m["disabled"]    = saved_m.get("disabled", False)
+            m["_workspaces"] = saved_m.get("_workspaces", [])
+
+        self._canvas.set_monitors(self._monitors)
+        self._settings.setVisible(False)
+        self._status_lbl.setText(f"Restored profile for: {key} — click Apply to activate")
+
+    def _delete_current_profile(self):
+        key = _profile_key(self._monitors)
+        _delete_profile(key)
+        self._update_profile_bar()
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _on_select(self, monitor):
         if monitor:
@@ -582,33 +684,8 @@ class DisplaysTab(QWidget):
         self._mirror_btn.setEnabled(not busy)
         self._extend_btn.setEnabled(not busy)
         self._edid_cb.setEnabled(not busy)
-
-    def _apply(self):
-        if not self._monitors:
-            return
-        try:
-            _write_monitors_lua(self._monitors, use_edid=self._edid_cb.isChecked())
-        except OSError as e:
-            self._status_lbl.setText(f"Save failed: {e}")
-            return
-        self._set_busy(True)
-        self._status_lbl.setText("Reloading Hyprland config…")
-        dispatch_cmds = []
-        for m in self._monitors:
-            for ws_id in m.get("_workspaces", []):
-                dispatch_cmds.append(
-                    "hl.dsp.workspace.move({ monitor = '" + m["name"] + "', workspace = " + str(ws_id) + " })"
-                )
-        self._reload_thread = _ReloadThread(dispatch_cmds)
-        self._reload_thread.done.connect(self._on_reload_done)
-        self._reload_thread.start()
-
-    def _on_reload_done(self, ok):
-        self._set_busy(False)
-        if ok:
-            self._status_lbl.setText("Applied — click Reload to sync if Hyprland adjusted positions")
-        else:
-            self._status_lbl.setText("Saved — Hyprland reload failed, restart to apply")
+        self._restore_btn.setEnabled(not busy)
+        self._delete_profile_btn.setEnabled(not busy)
 
     def _on_mirror_preset(self):
         if not self._monitors:
@@ -631,3 +708,32 @@ class DisplaysTab(QWidget):
         self._settings.setVisible(False)
         names = " + ".join(m["name"] for m in result)
         self._status_lbl.setText(f"Extending: {names} — click Apply to save")
+
+    # ── Daemon controls ──────────────────────────────────────────────────────
+
+    def _refresh_daemon_status(self):
+        pid = _daemon_pid()
+        if pid:
+            self._daemon_lbl.setText(f"Monitor daemon: running (PID {pid})")
+            self._daemon_btn.setText("Stop")
+        else:
+            self._daemon_lbl.setText("Monitor daemon: not running")
+            self._daemon_btn.setText("Start")
+
+    def _toggle_daemon(self):
+        pid = _daemon_pid()
+        if pid:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        else:
+            _daemon_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "monitor_daemon.py"
+            )
+            if os.path.exists(_daemon_path):
+                import subprocess as _sp, sys as _sys
+                _sp.Popen([_sys.executable, _daemon_path])
+        # Give the process a moment to start/die before refreshing
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(400, self._refresh_daemon_status)

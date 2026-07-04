@@ -36,6 +36,28 @@ def _acquire_lock():
         return False
 
 
+def _detect_icon_theme():
+    try:
+        r = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "icon-theme"],
+            capture_output=True, text=True, timeout=2,
+        )
+        val = r.stdout.strip().strip("'\"")
+        if val:
+            return val
+    except Exception:
+        pass
+    try:
+        cp = configparser.RawConfigParser()
+        cp.read(os.path.expanduser("~/.config/gtk-3.0/settings.ini"))
+        val = cp.get("Settings", "gtk-icon-theme-name", fallback="")
+        if val:
+            return val
+    except Exception:
+        pass
+    return "hicolor"
+
+
 def _detect_dark():
     try:
         r = subprocess.run(
@@ -450,6 +472,7 @@ def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("sans", 14))
     app.setStyleSheet(_qss())
+    QIcon.setThemeName(_detect_icon_theme())
 
     import common
     def _apply_theme(dark: bool):
@@ -457,6 +480,10 @@ def main():
         _is_dark = dark
         app.setStyleSheet(_qss())
     common.on_theme_change = _apply_theme
+
+    _daemon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitor_daemon.py")
+    if os.path.exists(_daemon_path):
+        subprocess.Popen([sys.executable, _daemon_path])
 
     window = QMainWindow()
     window.setWindowTitle("Settings")
