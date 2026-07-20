@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import tempfile
-from PySide6.QtCore import QSize
 from PySide6.QtGui import QFont, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QFrame, QHBoxLayout,
@@ -15,6 +14,7 @@ from wifi_tab import WifiTab
 from bluetooth_tab import BluetoothTab
 from displays_tab import DisplaysTab
 from sound_tab import SoundTab
+from battery_tab import BatteryTab
 from apps_tab import AppsTab
 from appearance_tab import AppearanceTab
 from system_tab import SystemTab
@@ -445,6 +445,7 @@ _PAGES = [
     ("Bluetooth",   "bluetooth",                                BluetoothTab),
     ("Displays",    "video-display",                            DisplaysTab),
     ("Sound",       "audio-volume-high",                        SoundTab),
+    ("Battery",     "battery",                                  BatteryTab),
     ("Apps",        "preferences-desktop-default-applications", AppsTab),
     ("Appearance",  "preferences-desktop-theme",                AppearanceTab),
     ("System",      "preferences-system",                       SystemTab),
@@ -455,9 +456,10 @@ _TAB_FLAGS = [
     ({"--bluetooth"},                     1),
     ({"--displays"},                      2),
     ({"--sound"},                         3),
-    ({"--apps"},                          4),
-    ({"--appearance", "--appearence"},    5),
-    ({"--system"},                        6),
+    ({"--battery"},                       4),
+    ({"--apps"},                          5),
+    ({"--appearance", "--appearence"},    6),
+    ({"--system"},                        7),
 ]
 
 
@@ -519,15 +521,11 @@ def main():
         stack.setCurrentIndex(idx)
         btn_group.button(idx).setChecked(True)
 
-    for i, (label, icon_name, PageClass) in enumerate(_PAGES):
+    for i, (label, _, PageClass) in enumerate(_PAGES):
         stack.addWidget(PageClass())
-        btn = QPushButton(f"  {label}")
+        btn = QPushButton(label)
         btn.setObjectName("navBtn")
         btn.setCheckable(True)
-        icon = QIcon.fromTheme(icon_name)
-        if not icon.isNull():
-            btn.setIcon(icon)
-            btn.setIconSize(QSize(16, 16))
         btn.clicked.connect(lambda _, idx=i: _goto(idx))
         btn_group.addButton(btn, i)
         sb.addWidget(btn)
@@ -536,13 +534,9 @@ def main():
 
     about_idx = len(_PAGES)
     stack.addWidget(AboutTab())
-    about_btn = QPushButton("  About")
+    about_btn = QPushButton("About")
     about_btn.setObjectName("navBtn")
     about_btn.setCheckable(True)
-    about_icon = QIcon.fromTheme("help-about")
-    if not about_icon.isNull():
-        about_btn.setIcon(about_icon)
-        about_btn.setIconSize(QSize(16, 16))
     about_btn.clicked.connect(lambda: _goto(about_idx))
     btn_group.addButton(about_btn, about_idx)
     sb.addWidget(about_btn)
@@ -576,6 +570,17 @@ def main():
         QShortcut(QKeySequence(f"Alt+{i + 1}"), window).activated.connect(
             lambda idx=i: _goto(idx)
         )
+
+    # Reload current page
+    def _reload_current():
+        w = stack.currentWidget()
+        if hasattr(w, '_load'):
+            w._load()
+        elif hasattr(w, '_scan'):
+            w._scan()
+
+    QShortcut(QKeySequence("F5"),     window).activated.connect(_reload_current)
+    QShortcut(QKeySequence("Ctrl+R"), window).activated.connect(_reload_current)
 
     # Ctrl+Tab / Ctrl+Shift+Tab cycle
     n = len(_PAGES)

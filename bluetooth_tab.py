@@ -9,6 +9,28 @@ from PySide6.QtWidgets import (
 from common import run, separator, make_centered, NavList, ToggleSwitch
 
 
+def _run_bt_interactive(op: str, mac: str, timeout: int = 20) -> tuple[str, bool]:
+    """Run a bluetoothctl pair/connect with a NoInputNoOutput agent registered."""
+    script = f"agent NoInputNoOutput\ndefault-agent\n{op} {mac}\nquit\n"
+    try:
+        proc = subprocess.Popen(
+            ["bluetoothctl"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True,
+        )
+        out, _ = proc.communicate(input=script, timeout=timeout)
+        ok = any(s in out for s in [
+            "Connection successful", "Pairing successful",
+            "Connected: yes", "Paired: yes",
+        ])
+        return out, ok
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return "", False
+    except FileNotFoundError:
+        return "bluetoothctl not found", False
+
+
 def _bt_enabled():
     out, _ = run(["bluetoothctl", "show"])
     return "Powered: yes" in out
@@ -83,7 +105,13 @@ class _ActionThread(QThread):
         self._cmd = cmd
 
     def run(self):
-        out, ok = run(self._cmd)
+        cmd = self._cmd
+        # pair and connect need an agent to handle confirmation dialogs
+        if (len(cmd) >= 3 and cmd[0] == "bluetoothctl"
+                and cmd[1] in ("connect", "pair")):
+            out, ok = _run_bt_interactive(cmd[1], cmd[2])
+        else:
+            out, ok = run(cmd)
         self.done.emit(ok, out)
 
 
