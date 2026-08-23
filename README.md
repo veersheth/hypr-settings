@@ -1,4 +1,4 @@
-<img width="1260" height="1080" alt="image" src="https://github.com/user-attachments/assets/d3e09459-55d8-41cb-a650-a1dddd44a93a" />
+<img width="1308" height="1025" alt="image" src="https://github.com/user-attachments/assets/8820ab77-545d-4a87-b93d-e47d4e33ad87" />
 
 This is for system settings only, *not* to "tweak the look and feel of Hyprland"
 
