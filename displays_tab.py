@@ -4,7 +4,7 @@ import re
 from PySide6.QtCore import Qt, QRect, QPoint, QThread, Signal
 from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
+    QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 from common import run, separator, make_centered
@@ -463,12 +463,6 @@ class DisplaysTab(QWidget):
         title.setObjectName("pageTitle")
         header.addWidget(title)
         header.addStretch()
-        self._edid_cb = QCheckBox("Match by display ID")
-        self._edid_cb.setToolTip(
-            "Use display description (EDID) instead of port name.\n"
-            "Arrangement survives plugging into a different port."
-        )
-        header.addWidget(self._edid_cb)
         self._apply_btn = QPushButton("Apply")
         self._apply_btn.clicked.connect(self._apply)
         self._reload_btn = QPushButton("Reload")
@@ -595,16 +589,14 @@ class DisplaysTab(QWidget):
     def _apply(self):
         if not self._monitors:
             return
-        use_edid = self._edid_cb.isChecked()
         try:
-            write_monitors_lua(self._monitors, use_edid=use_edid)
+            write_monitors_lua(self._monitors, use_edid=True)
         except OSError as e:
             self._status_lbl.setText(f"Save failed: {e}")
             return
 
-        # Save profile for the current monitor combination
         key = _profile_key(self._monitors)
-        _save_profile(key, self._monitors, use_edid)
+        _save_profile(key, self._monitors, use_edid=True)
 
         self._set_busy(True)
         self._status_lbl.setText("Reloading Hyprland config…")
@@ -637,8 +629,6 @@ class DisplaysTab(QWidget):
             return
 
         saved = profiles[key]["monitors"]
-        use_edid = profiles[key].get("use_edid", False)
-        self._edid_cb.setChecked(use_edid)
 
         # Map saved configs onto live monitors by display_id so availableModes
         # and current port names are preserved from hyprctl.
@@ -683,7 +673,6 @@ class DisplaysTab(QWidget):
         self._reload_btn.setEnabled(not busy)
         self._mirror_btn.setEnabled(not busy)
         self._extend_btn.setEnabled(not busy)
-        self._edid_cb.setEnabled(not busy)
         self._restore_btn.setEnabled(not busy)
         self._delete_profile_btn.setEnabled(not busy)
 

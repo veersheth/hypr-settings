@@ -80,11 +80,11 @@ class ToggleSwitch(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self._W, self._H
         p.setPen(Qt.NoPen)
-        # Interpolate track: #2e2e2e (off) -> #3b82f6 (on)
+        # Interpolate track: #2e2e2e (off) -> #a3b3d4 (on)
         t = self._pos
-        tr = int(46  + t * (59  - 46))
-        tg = int(46  + t * (130 - 46))
-        tb = int(46  + t * (246 - 46))
+        tr = int(46  + t * (163 - 46))
+        tg = int(46  + t * (179 - 46))
+        tb = int(46  + t * (212 - 46))
         p.setBrush(QColor(tr, tg, tb))
         p.drawRoundedRect(0, 0, w, h, h / 2, h / 2)
         m = 3

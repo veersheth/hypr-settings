@@ -114,6 +114,11 @@ def main() -> None:
 
     print(f"{LOG} Connected — listening on {sp}", flush=True)
 
+    # Apply once at startup: Hyprland reads monitors.lua on init but workspace
+    # dispatch + a full reload are needed for positions/assignments to stick.
+    time.sleep(2)
+    _apply_profile_for_current_monitors()
+
     while True:
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
