@@ -255,6 +255,14 @@ QPushButton:checked {{
     border-color: {ACCENT};
 }}
 
+QPushButton:default {{
+    border-color: {ACCENT};
+}}
+
+QPushButton:default:hover {{
+    border-color: {BORDER_FOCUS};
+}}
+
 /* ── Lists ── */
 
 QListWidget {{

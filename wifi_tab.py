@@ -493,122 +493,136 @@ class _EnterpriseDialog(QDialog):
         return args
 
 
-# ── detail panel ──────────────────────────────────────────────────────────────
+# ── network detail dialog ─────────────────────────────────────────────────────
 
-class _DetailPanel(QWidget):
-    action_done = Signal()
+class _NetworkDetailThread(QThread):
+    done = Signal(dict, bool, bool)  # conn_info, saved, autoconnect
 
-    def __init__(self):
+    def __init__(self, network, device):
         super().__init__()
-        self._network = None
-        self._device = None
+        self._network = network
+        self._device  = device
 
+    def run(self):
+        net = self._network
+        saved = _saved_connection(net["ssid"])
+        autoconnect = _get_autoconnect(net["ssid"]) if saved else False
+        conn_info = (
+            _get_connection_info(self._device)
+            if net["connected"] and self._device else {}
+        )
+        self.done.emit(conn_info, saved, autoconnect)
+
+
+class _NetworkDialog(QDialog):
+    def __init__(self, network: dict, device: str | None, parent=None):
+        super().__init__(parent)
+        self._network = network
+        self._device  = device
+        self._saved   = False
+        self._thread  = None
+
+        self.setWindowTitle(network["ssid"])
+        self.setMinimumWidth(400)
+        self._build_ui()
+        self._load()
+
+    def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 4, 0, 0)
+        root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(8)
-        root.setAlignment(Qt.AlignTop)
 
-        # Network identity
-        self._ssid_lbl = QLabel()
-        self._ssid_lbl.setObjectName("detailTitle")
-        root.addWidget(self._ssid_lbl)
-        self._signal_lbl = QLabel()
-        self._security_lbl = QLabel()
-        root.addWidget(self._signal_lbl)
-        root.addWidget(self._security_lbl)
+        title = QLabel(self._network["ssid"])
+        title.setObjectName("detailTitle")
+        root.addWidget(title)
 
-        # Connection details (connected only)
-        self._conn_sep = separator()
-        root.addWidget(self._conn_sep)
-        self._ip_lbl = QLabel()
-        self._subnet_lbl = QLabel()
+        root.addWidget(QLabel(f"Signal: {self._network['signal']}%"))
+        lock = "  🔒" if self._network["security"] != "Open" else ""
+        root.addWidget(QLabel(f"Security: {self._network['security']}{lock}"))
+
+        root.addWidget(separator())
+
+        connected = self._network["connected"]
+        self._ip_lbl      = QLabel("Loading…" if connected else "")
+        self._subnet_lbl  = QLabel()
         self._gateway_lbl = QLabel()
-        self._dns_lbl = QLabel()
+        self._dns_lbl     = QLabel()
         for w in (self._ip_lbl, self._subnet_lbl, self._gateway_lbl, self._dns_lbl):
+            w.setVisible(connected)
             root.addWidget(w)
+        self._conn_sep = separator()
+        self._conn_sep.setVisible(connected)
+        root.addWidget(self._conn_sep)
 
-        # Auto-connect (saved networks)
-        self._auto_sep = separator()
-        root.addWidget(self._auto_sep)
         self._autoconnect_cb = QCheckBox("Auto-connect")
+        self._autoconnect_cb.setVisible(False)
         self._autoconnect_cb.stateChanged.connect(self._toggle_autoconnect)
         root.addWidget(self._autoconnect_cb)
 
-        # Actions
         root.addWidget(separator())
-        btn_row = QHBoxLayout()
-        self._connect_btn = QPushButton()
-        self._connect_btn.clicked.connect(self._on_connect)
-        self._forget_btn = QPushButton("Forget")
-        self._forget_btn.clicked.connect(self._on_forget)
-        btn_row.addWidget(self._connect_btn)
-        btn_row.addWidget(self._forget_btn)
-        btn_row.addStretch()
-        root.addLayout(btn_row)
 
         self._status_lbl = QLabel()
+        self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
-        root.addStretch()
-        self.setVisible(False)
 
-    def show_network(self, network: dict, device: str | None):
-        self._network = network
-        self._device = device
-        saved = _saved_connection(network["ssid"])
+        btn_row = QHBoxLayout()
+        self._connect_btn = QPushButton(
+            "Disconnect" if connected else "Connect"
+        )
+        self._connect_btn.setDefault(True)
+        self._connect_btn.clicked.connect(self._on_connect)
+        btn_row.addWidget(self._connect_btn)
 
-        self._ssid_lbl.setText(network["ssid"])
-        self._signal_lbl.setText(f"Signal strength: {network['signal']}%")
-        lock = "  🔒" if network["security"] != "Open" else ""
-        self._security_lbl.setText(f"Security: {network['security']}{lock}")
-        self._status_lbl.setText("")
+        self._forget_btn = QPushButton("Forget")
+        self._forget_btn.setVisible(False)
+        self._forget_btn.clicked.connect(self._on_forget)
+        btn_row.addWidget(self._forget_btn)
 
-        # Connection info
-        connected = network["connected"]
-        self._conn_sep.setVisible(connected)
-        self._ip_lbl.setVisible(connected)
-        self._subnet_lbl.setVisible(connected)
-        self._gateway_lbl.setVisible(connected)
-        self._dns_lbl.setVisible(connected)
-        if connected and device:
-            info = _get_connection_info(device)
-            self._ip_lbl.setText(f"IP Address: {info.get('ip', '—')}")
-            self._subnet_lbl.setText(f"Subnet Mask: {info.get('subnet', '—')}")
-            self._gateway_lbl.setText(f"Gateway: {info.get('gateway', '—')}")
-            self._dns_lbl.setText(f"DNS: {info.get('dns', '—')}")
+        btn_row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.reject)
+        btn_row.addWidget(close_btn)
+        root.addLayout(btn_row)
 
-        # Auto-connect
-        self._auto_sep.setVisible(saved)
+    def _load(self):
+        t = _NetworkDetailThread(self._network, self._device)
+        t.done.connect(self._on_detail_loaded)
+        t.start()
+        self._thread = t
+
+    def _on_detail_loaded(self, conn_info, saved, autoconnect):
+        self._saved = saved
+        if self._network["connected"] and conn_info:
+            self._ip_lbl.setText(f"IP: {conn_info.get('ip', '—')}")
+            self._subnet_lbl.setText(f"Subnet: {conn_info.get('subnet', '—')}")
+            self._gateway_lbl.setText(f"Gateway: {conn_info.get('gateway', '—')}")
+            self._dns_lbl.setText(f"DNS: {conn_info.get('dns', '—')}")
+        elif self._network["connected"]:
+            self._ip_lbl.setText("IP: —")
+        self._autoconnect_cb.blockSignals(True)
+        self._autoconnect_cb.setChecked(autoconnect)
+        self._autoconnect_cb.blockSignals(False)
         self._autoconnect_cb.setVisible(saved)
-        if saved:
-            self._autoconnect_cb.blockSignals(True)
-            self._autoconnect_cb.setChecked(_get_autoconnect(network["ssid"]))
-            self._autoconnect_cb.blockSignals(False)
-
-        # Buttons
-        self._connect_btn.setText("Disconnect" if connected else "Connect")
         self._forget_btn.setVisible(saved)
 
-        self.setVisible(True)
-
     def _toggle_autoconnect(self, state):
-        if self._network:
-            val = "yes" if bool(state) else "no"
-            run(["nmcli", "connection", "modify", "id",
-                  self._network["ssid"], "connection.autoconnect", val])
+        val = "yes" if bool(state) else "no"
+        run(["nmcli", "connection", "modify", "id",
+              self._network["ssid"], "connection.autoconnect", val])
 
     def _on_connect(self):
         net = self._network
-        if not net:
-            return
-
         if net["connected"]:
-            self._set_status("Disconnecting…")
-            run(["nmcli", "connection", "down", "id", net["ssid"]])
-            self.action_done.emit()
+            self._status_lbl.setText("Disconnecting…")
+            self._connect_btn.setEnabled(False)
+            t = _ConnectThread(["nmcli", "connection", "down", "id", net["ssid"]])
+            t.done.connect(lambda ok, _: self.accept())
+            t.start()
+            self._thread = t
             return
 
-        ssid = net["ssid"]
-        saved = _saved_connection(ssid)
+        ssid  = net["ssid"]
+        saved = self._saved
 
         if _is_enterprise(net["security"]):
             config = _get_enterprise_config(ssid) if saved else {}
@@ -616,18 +630,15 @@ class _DetailPanel(QWidget):
             if dlg.exec() != QDialog.DialogCode.Accepted:
                 return
             eap_args = dlg.get_nmcli_args()
-            if saved:
-                cmds = [
-                    ["nmcli", "connection", "modify", "id", ssid] + eap_args,
-                    ["nmcli", "connection", "up", "id", ssid],
-                ]
-            else:
-                cmds = [
-                    ["nmcli", "connection", "add", "type", "wifi",
-                     "con-name", ssid, "ssid", ssid] + eap_args,
-                    ["nmcli", "connection", "up", "id", ssid],
-                ]
-            self._set_status("Connecting…")
+            cmds = (
+                [["nmcli", "connection", "modify", "id", ssid] + eap_args,
+                 ["nmcli", "connection", "up", "id", ssid]]
+                if saved else
+                [["nmcli", "connection", "add", "type", "wifi",
+                  "con-name", ssid, "ssid", ssid] + eap_args,
+                 ["nmcli", "connection", "up", "id", ssid]]
+            )
+            self._status_lbl.setText("Connecting…")
             self._connect_btn.setEnabled(False)
             t = _MultiCmdThread(cmds)
             t.done.connect(self._on_connect_done)
@@ -650,7 +661,7 @@ class _DetailPanel(QWidget):
             if password:
                 cmd += ["password", password]
 
-        self._set_status("Connecting…")
+        self._status_lbl.setText("Connecting…")
         self._connect_btn.setEnabled(False)
         t = _ConnectThread(cmd)
         t.done.connect(self._on_connect_done)
@@ -658,27 +669,24 @@ class _DetailPanel(QWidget):
         self._thread = t
 
     def _on_connect_done(self, ok, out):
-        self._connect_btn.setEnabled(True)
         if ok:
-            self.action_done.emit()
+            self.accept()
         else:
-            self._set_status(f"Failed: {out.splitlines()[-1] if out else 'unknown error'}")
+            self._connect_btn.setEnabled(True)
+            self._status_lbl.setText(
+                f"Failed: {out.splitlines()[-1] if out else 'unknown error'}"
+            )
 
     def _on_forget(self):
         net = self._network
-        if not net:
-            return
         reply = QMessageBox.question(
             self, "Forget Network",
             f"Forget \"{net['ssid']}\"?\nYou will need to enter the password again to reconnect.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             run(["nmcli", "connection", "delete", "id", net["ssid"]])
-            self.action_done.emit()
-
-    def _set_status(self, text):
-        self._status_lbl.setText(text)
+            self.accept()
 
 
 # ── main tab ──────────────────────────────────────────────────────────────────
@@ -716,19 +724,13 @@ class WifiTab(QWidget):
         self._status_lbl.setObjectName("statusLabel")
         root.addWidget(self._status_lbl)
 
-        # Body
-        body = QHBoxLayout()
-        body.setSpacing(0)
-
-        # Left: network list + hidden network button
-        left = QVBoxLayout()
-        left.setSpacing(6)
-        left.setContentsMargins(0, 0, 16, 0)
+        # Network list
         self._list = NavList()
         self._list.setFrameShape(QFrame.NoFrame)
-        self._list.currentRowChanged.connect(self._on_select)
-        left.addWidget(self._list)
+        self._list.itemClicked.connect(self._on_select)
+        root.addWidget(self._list, stretch=1)
 
+        # Bottom buttons
         bottom_btns = QHBoxLayout()
         bottom_btns.setSpacing(6)
         hidden_btn = QPushButton("Hidden network…")
@@ -737,21 +739,8 @@ class WifiTab(QWidget):
         saved_btn = QPushButton("Saved networks…")
         saved_btn.clicked.connect(self._show_saved)
         bottom_btns.addWidget(saved_btn)
-        left.addLayout(bottom_btns)
-
-        body.addLayout(left, stretch=1)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setFixedWidth(1)
-        body.addWidget(sep)
-
-        # Right: detail panel
-        self._detail = _DetailPanel()
-        self._detail.action_done.connect(lambda: self._scan(rescan=True))
-        body.addWidget(self._detail, stretch=1)
-
-        root.addLayout(body, stretch=1)
+        bottom_btns.addStretch()
+        root.addLayout(bottom_btns)
 
     def _refresh_toggle(self):
         enabled = _wifi_enabled()
@@ -765,7 +754,6 @@ class WifiTab(QWidget):
             self._scan()
         else:
             self._list.clear()
-            self._detail.setVisible(False)
             self._status_lbl.setText("Wi-Fi disabled")
         # Sync switch to actual state in case the command failed
         self._wifi_switch.set_on(_wifi_enabled(), silent=True)
@@ -778,7 +766,6 @@ class WifiTab(QWidget):
         self._reload_btn.setEnabled(False)
         self._status_lbl.setText("Scanning…" if rescan else "Loading…")
         self._list.clear()
-        self._detail.setVisible(False)
         self._networks = []
         self._scan_thread = _ScanThread(rescan=rescan)
         self._scan_thread.done.connect(self._on_done)
@@ -804,10 +791,13 @@ class WifiTab(QWidget):
         self._reload_btn.setEnabled(True)
         self._status_lbl.setText(f"Error: {msg}")
 
-    def _on_select(self, row):
+    def _on_select(self, item):
+        row = self._list.row(item)
         if 0 <= row < len(self._networks):
-            device = _wifi_device()
-            self._detail.show_network(self._networks[row], device)
+            dlg = _NetworkDialog(self._networks[row], _wifi_device(), self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self._scan(rescan=True)
+            self._list.clearSelection()
 
     def _show_saved(self):
         dlg = _SavedNetworksDialog(self)
